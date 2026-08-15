@@ -12,8 +12,14 @@ pnpm install
 pnpm dev
 ```
 
-Open `http://localhost:3000`, then click **Fetch Oh My Pi data**. The import is
-only triggered by that button; there is no polling or background sync.
+Open `http://localhost:3000`, then click **Fetch Oh My Pi data**. That button runs
+`omp stats --json` first, which is what tails `~/.omp/agent/sessions/` into
+`~/.omp/stats.db`, and then imports the refreshed database. Nothing else advances
+`~/.omp/stats.db`, so without that step an import re-reads whatever snapshot the
+last `omp stats` run left behind. There is still no polling or background sync;
+everything happens on that click. If `omp` cannot be run the import falls back to
+the existing snapshot and the dashboard shows a warning instead of pretending the
+data is current.
 
 The API reads `~/.omp/stats.db` by default and writes its own database to
 `apps/api/data/token-tracker.sqlite`.
@@ -35,6 +41,7 @@ planning.
 | --- | --- | --- |
 | `OMP_STATS_DB` | `~/.omp/stats.db` | Oh My Pi source database |
 | `DATA_DIR` | `apps/api/data` | Token Tracker SQLite directory |
+| `OMP_BIN` | `omp` | Oh My Pi binary used for the session sync |
 | `PORT` | `4000` | API port |
 | `HOST` | `127.0.0.1` | API bind address |
 | `API_URL` | `http://127.0.0.1:4000` | Backend origin used by Next.js |

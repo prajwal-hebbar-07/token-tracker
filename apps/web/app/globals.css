@@ -178,6 +178,12 @@ h2 {
   background: rgba(61, 78, 28, 0.25);
 }
 
+.warningAlert {
+  border-color: rgba(251, 191, 36, 0.35);
+  color: #fde8b0;
+  background: rgba(120, 78, 12, 0.28);
+}
+
 .emptyState {
   display: grid;
   min-height: 62vh;

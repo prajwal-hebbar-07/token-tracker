@@ -95,6 +95,13 @@ function isDashboard(value: unknown): value is Dashboard {
   );
 }
 
+function sessionSyncWarning(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object" || !("sessionSync" in payload)) return null;
+  const sync = payload.sessionSync;
+  if (!sync || typeof sync !== "object" || !("warning" in sync)) return null;
+  return typeof sync.warning === "string" ? sync.warning : null;
+}
+
 async function requestJson(path: string, init?: RequestInit): Promise<unknown> {
   const response = await fetch(path, { ...init, cache: "no-store" });
   const payload: unknown = await response.json();
@@ -114,6 +121,7 @@ export default function DashboardPage() {
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
 
   const loadDashboard = useCallback(async () => {
     const payload = await requestJson("/api/dashboard");
@@ -139,10 +147,13 @@ export default function DashboardPage() {
     setImporting(true);
     setError(null);
     setNotice(null);
+    setWarning(null);
     try {
-      await requestJson("/api/import", { method: "POST" });
+      const payload = await requestJson("/api/import", { method: "POST" });
       await loadDashboard();
-      setNotice("Oh My Pi usage imported successfully.");
+      const syncWarning = sessionSyncWarning(payload);
+      if (syncWarning) setWarning(syncWarning);
+      else setNotice("Oh My Pi sessions synced and usage imported successfully.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not import Oh My Pi usage");
     } finally {
@@ -191,6 +202,7 @@ export default function DashboardPage() {
 
       {error && <div className="alert errorAlert">{error}</div>}
       {notice && <div className="alert successAlert">{notice}</div>}
+      {warning && <div className="alert warningAlert">{warning}</div>}
 
       {loading ? (
         <section className="emptyState"><div className="spinner" /><p>Loading saved usage…</p></section>

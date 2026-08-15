@@ -1,5 +1,6 @@
 import { createServer, type ServerResponse } from "node:http";
-import { getDashboard, importFromOmp, openTrackerDatabase } from "./db.js";
+import { getDashboard, type ImportResult, importFromOmp, openTrackerDatabase } from "./db.js";
+import { syncOmpSessions } from "./omp-sync.js";
 
 const host = process.env.HOST ?? "127.0.0.1";
 const port = Number(process.env.PORT ?? 4000);
@@ -36,8 +37,16 @@ const server = createServer((request, response) => {
     }
 
     if (request.method === "POST" && url.pathname === "/api/import") {
-      const result = importFromOmp(tracker);
-      sendJson(response, 200, { result, dashboard: getDashboard(tracker) });
+      const sessionSync = syncOmpSessions();
+      let result: ImportResult;
+      try {
+        result = importFromOmp(tracker);
+      } catch (error) {
+        if (!sessionSync.warning) throw error;
+        const message = error instanceof Error ? error.message : "Import failed";
+        throw new Error(`${message} (session sync also failed: ${sessionSync.warning})`);
+      }
+      sendJson(response, 200, { result, sessionSync, dashboard: getDashboard(tracker) });
       return;
     }
 
