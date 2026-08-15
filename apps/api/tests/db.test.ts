@@ -4,31 +4,15 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { getDashboard, importFromOmp, openTrackerDatabase } from "../src/db.js";
+import { getDashboard, importFromOmp, openTrackerDatabase, saveLimitsSnapshot } from "../src/db.js";
 
 function writeSession(filePath: string, userText: string, entryIds: string[]): void {
-  const records: Array<Record<string, unknown>> = [
-    {
-      type: "message",
-      id: "user-request",
-      parentId: null,
-      message: { role: "user", content: [{ type: "text", text: userText }] },
-    },
-  ];
-  let parentId = "user-request";
+  const lines: string[] = [];
+  lines.push(JSON.stringify({ id: "user-request", message: { role: "user", content: userText } }));
   for (const entryId of entryIds) {
-    records.push({
-      type: "message",
-      id: entryId,
-      parentId,
-      message: { role: "assistant", content: [] },
-    });
-    parentId = entryId;
+    lines.push(JSON.stringify({ id: entryId, parentId: "user-request" }));
   }
-
-  let jsonl = "";
-  for (const record of records) jsonl += `${JSON.stringify(record)}\n`;
-  writeFileSync(filePath, jsonl);
+  writeFileSync(filePath, lines.join("\n") + "\n");
 }
 
 function createSourceDatabase(filePath: string): DatabaseSync {
@@ -105,21 +89,17 @@ test("imports OMP rows idempotently and applies recorded and MiniMax prices", ()
     assert.ok(Math.abs(firstDashboard.summary.cost - 0.0575) < 1e-12);
     assert.equal(firstDashboard.summary.totalTokens, 13_850);
     assert.equal(firstDashboard.summary.sessionCount, 2);
-    const design = firstDashboard.categories.find((category) => category.category === "Design");
-    const debugging = firstDashboard.categories.find((category) => category.category === "Debugging");
-    assert.ok(design);
-    assert.ok(debugging);
-    assertClose(design.cost, 0.056);
-    assertClose(debugging.cost, 0.0015);
-    assert.equal(firstDashboard.workspaces.length, 2);
-    assert.equal(firstDashboard.agents.length, 2);
+    const firstDesign = firstDashboard.categories.find((entry) => entry.category === "Design");
+    assert.ok(firstDesign);
+    assert.equal(firstDesign.totalTokens, 13_300);
+    const firstDebugging = firstDashboard.categories.find((entry) => entry.category === "Debugging");
+    assert.ok(firstDebugging);
+    assert.equal(firstDebugging.totalTokens, 550);
 
     const claude = firstDashboard.models.find((model) => model.model === "claude-opus-5");
     assert.ok(claude);
-    assert.ok(Math.abs((claude.inputPricePerMillion ?? Number.NaN) - 5) < 1e-12);
-    assert.ok(Math.abs((claude.outputPricePerMillion ?? Number.NaN) - 25) < 1e-12);
-    assert.ok(Math.abs((claude.cacheReadPricePerMillion ?? Number.NaN) - 0.5) < 1e-12);
-    assert.ok(Math.abs((claude.cacheWritePricePerMillion ?? Number.NaN) - 10) < 1e-12);
+    assertClose(claude.cost, 0.056);
+    assertClose(claude.effectivePricePerMillion, (0.056 / 13_300) * 1_000_000);
 
     const secondImport = importFromOmp(tracker, sourcePath);
     assert.equal(secondImport.newRecords, 0);
@@ -171,16 +151,138 @@ test("imports OMP rows idempotently and applies recorded and MiniMax prices", ()
     assertClose(longContext.cost_cache_write, 0);
     assertClose(longContext.cost_total, 0.31200012);
     assertClose(longContext.cost_no_cache_input, 0.3600006);
-    const categorizedDashboard = getDashboard(tracker);
-    assertClose(categorizedDashboard.summary.cost, 0.42400012);
-    const research = categorizedDashboard.categories.find((category) => category.category === "Research");
-    const logic = categorizedDashboard.categories.find((category) => category.category === "Logic & planning");
-    assert.ok(research);
-    assert.ok(logic);
-    assertClose(research.cost, 0.054);
-    assertClose(logic.cost, 0.31200012);
+
+    const finalDashboard = getDashboard(tracker);
+    assertClose(finalDashboard.summary.cost, 0.42400012);
+    const minimax = finalDashboard.models.find((model) => model.model === "minimax-m3");
+    assert.ok(minimax);
+    assertClose(minimax.cost, 0.36600012);
+    assertClose(minimax.effectivePricePerMillion, (0.36600012 / 930_001) * 1_000_000);
+    const finalResearch = finalDashboard.categories.find((entry) => entry.category === "Research");
+    assert.ok(finalResearch);
+    assert.equal(finalResearch.totalTokens, 310_000);
+    const finalLogic = finalDashboard.categories.find((entry) => entry.category === "Logic & planning");
+    assert.ok(finalLogic);
+    assert.equal(finalLogic.totalTokens, 620_001);
   } finally {
     source.close();
+    tracker.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("keeps only the newest limits snapshot and serves it to the dashboard", () => {
+  const directory = mkdtempSync(join(tmpdir(), "token-tracker-limits-"));
+  const tracker = openTrackerDatabase(join(directory, "tracker.sqlite"));
+
+  try {
+    assert.equal(getDashboard(tracker).limits, null);
+
+    saveLimitsSnapshot(tracker, {
+      capturedAt: 1_700_000_000_000,
+      generatedAt: 1_699_999_999_000,
+      providers: [
+        {
+          provider: "anthropic",
+          account: "someone@example.com",
+          plan: null,
+          fetchedAt: 1_699_999_998_000,
+          windows: [
+            {
+              id: "anthropic:5h",
+              label: "Claude 5 Hour",
+              unit: "percent",
+              status: "ok",
+              used: 47,
+              limit: 100,
+              remaining: 53,
+              usedFraction: 0.47,
+              resetsAt: 1_700_003_600_000,
+            },
+          ],
+          notes: [],
+        },
+      ],
+    });
+    saveLimitsSnapshot(tracker, {
+      capturedAt: 1_700_000_060_000,
+      generatedAt: null,
+      providers: [{ provider: "ollama-cloud", account: null, plan: null, fetchedAt: null, windows: [], notes: ["No quota API."] }],
+    });
+
+    const rows = tracker.prepare("SELECT COUNT(*) AS count FROM limit_snapshots").get();
+    assert.equal(rows?.count, 1);
+
+    const limits = getDashboard(tracker).limits;
+    assert.ok(limits);
+    assert.equal(limits.capturedAt, 1_700_000_060_000);
+    assert.deepEqual(limits.providers.map((provider) => provider.provider), ["ollama-cloud"]);
+    assert.deepEqual(limits.providers[0]?.notes, ["No quota API."]);
+  } finally {
+    tracker.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("preserves the work-category column from earlier builds", () => {
+  const directory = mkdtempSync(join(tmpdir(), "token-tracker-migrate-"));
+  const trackerPath = join(directory, "tracker.sqlite");
+  const legacy = new DatabaseSync(trackerPath);
+  legacy.exec(`
+    CREATE TABLE usage_messages (
+      session_file TEXT NOT NULL,
+      entry_id TEXT NOT NULL,
+      folder TEXT NOT NULL,
+      model TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      api TEXT NOT NULL,
+      timestamp INTEGER NOT NULL,
+      duration REAL,
+      ttft REAL,
+      stop_reason TEXT NOT NULL,
+      error_message TEXT,
+      input_tokens INTEGER NOT NULL,
+      output_tokens INTEGER NOT NULL,
+      cache_read_tokens INTEGER NOT NULL,
+      cache_write_tokens INTEGER NOT NULL,
+      total_tokens INTEGER NOT NULL,
+      premium_requests REAL NOT NULL,
+      cost_input REAL NOT NULL,
+      cost_output REAL NOT NULL,
+      cost_cache_read REAL NOT NULL,
+      cost_cache_write REAL NOT NULL,
+      cost_total REAL NOT NULL,
+      agent_type TEXT NOT NULL,
+      cost_no_cache_input REAL,
+      category TEXT NOT NULL,
+      imported_at INTEGER NOT NULL,
+      PRIMARY KEY (session_file, entry_id)
+    ) WITHOUT ROWID;
+    CREATE INDEX usage_category_idx ON usage_messages(category);
+    INSERT INTO usage_messages VALUES (
+      'session-1.jsonl', 'entry-1', 'workspace', 'claude-opus-5', 'anthropic', 'messages',
+      1700000000000, 100, 50, 'stop', NULL, 1000, 100, 0, 0, 1100, 0,
+      0.01, 0.01, 0, 0, 0.02, 'main', 0.02, 'Design', 1700000000000
+    );
+  `);
+  legacy.close();
+
+  const tracker = openTrackerDatabase(trackerPath);
+  try {
+    const columns = tracker.prepare("PRAGMA table_info(usage_messages)").all();
+    assert.ok(columns.some((column) => column.name === "category"));
+
+    // Existing rows survive the migration and still aggregate.
+    const dashboard = getDashboard(tracker);
+    assert.equal(dashboard.summary.messageCount, 1);
+    assertClose(dashboard.models[0]?.cost, 0.02);
+    const design = dashboard.categories.find((entry) => entry.category === "Design");
+    assert.ok(design);
+    assert.equal(design.totalTokens, 1_100);
+
+    // Reopening a migrated database is a no-op rather than an error.
+    openTrackerDatabase(trackerPath).close();
+  } finally {
     tracker.close();
     rmSync(directory, { recursive: true, force: true });
   }

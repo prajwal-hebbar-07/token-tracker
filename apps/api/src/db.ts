@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type { LimitsSnapshot } from "./omp-cli.js";
 
 export interface ImportResult {
   sourcePath: string;
@@ -39,21 +40,6 @@ interface UsageRow {
   category?: UsageCategory;
 }
 
-interface AggregateRow {
-  messageCount: number;
-  sessionCount: number;
-  inputTokens: number | null;
-  outputTokens: number | null;
-  cacheReadTokens: number | null;
-  cacheWriteTokens: number | null;
-  totalTokens: number | null;
-  inputCost: number | null;
-  outputCost: number | null;
-  cacheReadCost: number | null;
-  cacheWriteCost: number | null;
-  cost: number | null;
-}
-
 export interface Dashboard {
   generatedAt: number;
   lastSync: {
@@ -74,31 +60,26 @@ export interface Dashboard {
     firstMessageAt: number | null;
     lastMessageAt: number | null;
   };
-  models: Array<AggregateRow & {
+  models: Array<{
     model: string;
     provider: string;
-    inputPricePerMillion: number | null;
-    outputPricePerMillion: number | null;
-    cacheReadPricePerMillion: number | null;
-    cacheWritePricePerMillion: number | null;
-  }>;
-  workspaces: Array<AggregateRow & { folder: string }>;
-  agents: Array<AggregateRow & { agentType: string }>;
-  categories: Array<AggregateRow & { category: UsageCategory }>;
-  daily: Array<{
-    day: string;
     cost: number;
-    messages: number;
-    tokens: number;
+    effectivePricePerMillion: number | null;
   }>;
+  categories: Array<{
+    category: UsageCategory;
+    messageCount: number;
+    totalTokens: number;
+  }>;
+  limits: LimitsSnapshot | null;
 }
+
 // Standard pay-as-you-go rates published by MiniMax on 2026-08-15.
 // https://platform.minimax.io/docs/guides/pricing-paygo
 const MINIMAX_M3_CONTEXT_LIMIT = 512_000;
 const MINIMAX_M3_INPUT_PER_MILLION = 0.3;
 const MINIMAX_M3_OUTPUT_PER_MILLION = 1.2;
 const MINIMAX_M3_CACHE_READ_PER_MILLION = 0.06;
-
 type UsageCategory =
   | "Design"
   | "Development"
@@ -225,21 +206,6 @@ const usageColumns = `
   agent_type, cost_no_cache_input
 `;
 
-const aggregateColumns = `
-  COUNT(*) AS messageCount,
-  COUNT(DISTINCT session_file) AS sessionCount,
-  SUM(input_tokens) AS inputTokens,
-  SUM(output_tokens) AS outputTokens,
-  SUM(cache_read_tokens) AS cacheReadTokens,
-  SUM(cache_write_tokens) AS cacheWriteTokens,
-  SUM(total_tokens) AS totalTokens,
-  SUM(cost_input) AS inputCost,
-  SUM(cost_output) AS outputCost,
-  SUM(cost_cache_read) AS cacheReadCost,
-  SUM(cost_cache_write) AS cacheWriteCost,
-  SUM(cost_total) AS cost
-`;
-
 export function getOmpStatsPath(): string {
   return resolve(process.env.OMP_STATS_DB ?? join(homedir(), ".omp", "stats.db"));
 }
@@ -299,16 +265,17 @@ export function openTrackerDatabase(filePath = getTrackerDatabasePath()): Databa
       new_records INTEGER NOT NULL,
       total_records INTEGER NOT NULL
     );
+
+    -- Provider quota limits are a single point-in-time reading, so the newest
+    -- one replaces the previous row instead of accumulating history.
+    CREATE TABLE IF NOT EXISTS limit_snapshots (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      captured_at INTEGER NOT NULL,
+      payload TEXT NOT NULL
+    );
   `);
   const columns = db.prepare("PRAGMA table_info(usage_messages)").all();
-  let hasCategory = false;
-  for (const column of columns) {
-    if (column.name === "category") {
-      hasCategory = true;
-      break;
-    }
-  }
-  if (!hasCategory) {
+  if (!columns.some((column) => column.name === "category")) {
     db.exec("ALTER TABLE usage_messages ADD COLUMN category TEXT NOT NULL DEFAULT 'Logic & planning'");
   }
   db.exec("CREATE INDEX IF NOT EXISTS usage_category_idx ON usage_messages(category)");
@@ -462,25 +429,30 @@ function numberOrZero(value: number | null): number {
   return Number(value ?? 0);
 }
 
-function normalizeAggregate(row: AggregateRow): AggregateRow {
-  return {
-    messageCount: Number(row.messageCount),
-    sessionCount: Number(row.sessionCount),
-    inputTokens: numberOrZero(row.inputTokens),
-    outputTokens: numberOrZero(row.outputTokens),
-    cacheReadTokens: numberOrZero(row.cacheReadTokens),
-    cacheWriteTokens: numberOrZero(row.cacheWriteTokens),
-    totalTokens: numberOrZero(row.totalTokens),
-    inputCost: numberOrZero(row.inputCost),
-    outputCost: numberOrZero(row.outputCost),
-    cacheReadCost: numberOrZero(row.cacheReadCost),
-    cacheWriteCost: numberOrZero(row.cacheWriteCost),
-    cost: numberOrZero(row.cost),
-  };
-}
-
 function pricePerMillion(cost: number, tokens: number): number | null {
   return tokens === 0 ? null : (cost / tokens) * 1_000_000;
+}
+
+export function saveLimitsSnapshot(tracker: DatabaseSync, snapshot: LimitsSnapshot): void {
+  tracker.prepare(`
+    INSERT INTO limit_snapshots (id, captured_at, payload) VALUES (1, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET captured_at = excluded.captured_at, payload = excluded.payload
+  `).run(snapshot.capturedAt, JSON.stringify(snapshot));
+}
+
+function readLimitsSnapshot(tracker: DatabaseSync): LimitsSnapshot | null {
+  const row = tracker.prepare("SELECT payload FROM limit_snapshots WHERE id = 1").get();
+  if (!row || typeof row.payload !== "string") return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(row.payload);
+  } catch {
+    return null;
+  }
+  // A snapshot written by an older build can disagree with the current shape.
+  if (!parsed || typeof parsed !== "object") return null;
+  const snapshot = parsed as LimitsSnapshot;
+  return typeof snapshot.capturedAt === "number" && Array.isArray(snapshot.providers) ? snapshot : null;
 }
 
 export function getDashboard(tracker: DatabaseSync): Dashboard {
@@ -511,78 +483,45 @@ export function getDashboard(tracker: DatabaseSync): Dashboard {
   };
 
   const models = (tracker.prepare(`
-    SELECT model, provider, ${aggregateColumns}
+    SELECT
+      model,
+      provider,
+      SUM(cost_total) AS cost,
+      SUM(total_tokens) AS totalTokens
     FROM usage_messages
     GROUP BY model, provider
     ORDER BY cost DESC, totalTokens DESC
-  `).all() as unknown as Array<AggregateRow & { model: string; provider: string }>).map((row) => {
-    const aggregate = normalizeAggregate(row);
+  `).all() as unknown as Array<{
+    model: string;
+    provider: string;
+    cost: number | null;
+    totalTokens: number | null;
+  }>).map((row) => {
+    const cost = numberOrZero(row.cost);
     return {
       model: row.model,
       provider: row.provider,
-      ...aggregate,
-      inputPricePerMillion: pricePerMillion(aggregate.inputCost ?? 0, aggregate.inputTokens ?? 0),
-      outputPricePerMillion: pricePerMillion(aggregate.outputCost ?? 0, aggregate.outputTokens ?? 0),
-      cacheReadPricePerMillion: pricePerMillion(
-        aggregate.cacheReadCost ?? 0,
-        aggregate.cacheReadTokens ?? 0,
-      ),
-      cacheWritePricePerMillion: pricePerMillion(
-        aggregate.cacheWriteCost ?? 0,
-        aggregate.cacheWriteTokens ?? 0,
-      ),
+      cost,
+      // Blended rate actually paid across input, output, and cache traffic.
+      effectivePricePerMillion: pricePerMillion(cost, numberOrZero(row.totalTokens)),
     };
   });
-
-  const workspaces = (tracker.prepare(`
-    SELECT folder, ${aggregateColumns}
-    FROM usage_messages
-    GROUP BY folder
-    ORDER BY cost DESC, totalTokens DESC
-  `).all() as unknown as Array<AggregateRow & { folder: string }>).map((row) => ({
-    folder: row.folder,
-    ...normalizeAggregate(row),
-  }));
-
-  const agents = (tracker.prepare(`
-    SELECT agent_type AS agentType, ${aggregateColumns}
-    FROM usage_messages
-    GROUP BY agent_type
-    ORDER BY cost DESC, totalTokens DESC
-  `).all() as unknown as Array<AggregateRow & { agentType: string }>).map((row) => ({
-    agentType: row.agentType,
-    ...normalizeAggregate(row),
-  }));
-
   const categories = (tracker.prepare(`
-    SELECT category, ${aggregateColumns}
+    SELECT
+      category,
+      COUNT(*) AS messageCount,
+      SUM(total_tokens) AS totalTokens
     FROM usage_messages
     GROUP BY category
-    ORDER BY cost DESC, totalTokens DESC
-  `).all() as unknown as Array<AggregateRow & { category: UsageCategory }>).map((row) => ({
-    category: row.category,
-    ...normalizeAggregate(row),
-  }));
-
-  const daily = (tracker.prepare(`
-    SELECT
-      strftime('%Y-%m-%d', timestamp / 1000, 'unixepoch', 'localtime') AS day,
-      SUM(cost_total) AS cost,
-      COUNT(*) AS messages,
-      SUM(total_tokens) AS tokens
-    FROM usage_messages
-    GROUP BY day
-    ORDER BY day
+    ORDER BY totalTokens DESC
   `).all() as unknown as Array<{
-    day: string;
-    cost: number;
-    messages: number;
-    tokens: number;
+    category: UsageCategory;
+    messageCount: number;
+    totalTokens: number | null;
   }>).map((row) => ({
-    day: row.day,
-    cost: Number(row.cost),
-    messages: Number(row.messages),
-    tokens: Number(row.tokens),
+    category: row.category,
+    messageCount: Number(row.messageCount),
+    totalTokens: numberOrZero(row.totalTokens),
   }));
 
   const lastSync = tracker.prepare(`
@@ -619,9 +558,7 @@ export function getDashboard(tracker: DatabaseSync): Dashboard {
       lastMessageAt: summary.lastMessageAt === null ? null : Number(summary.lastMessageAt),
     },
     models,
-    workspaces,
-    agents,
     categories,
-    daily,
+    limits: readLimitsSnapshot(tracker),
   };
 }

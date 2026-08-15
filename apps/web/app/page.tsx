@@ -1,21 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-
-interface Aggregate {
-  messageCount: number;
-  sessionCount: number;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-  totalTokens: number;
-  inputCost: number;
-  outputCost: number;
-  cacheReadCost: number;
-  cacheWriteCost: number;
-  cost: number;
-}
+import { type CSSProperties, useCallback, useEffect, useState } from "react";
 
 interface Dashboard {
   generatedAt: number;
@@ -37,18 +22,39 @@ interface Dashboard {
     firstMessageAt: number | null;
     lastMessageAt: number | null;
   };
-  models: Array<Aggregate & {
+  models: Array<{
     model: string;
     provider: string;
-    inputPricePerMillion: number | null;
-    outputPricePerMillion: number | null;
-    cacheReadPricePerMillion: number | null;
-    cacheWritePricePerMillion: number | null;
+    cost: number;
+    effectivePricePerMillion: number | null;
   }>;
-  workspaces: Array<Aggregate & { folder: string }>;
-  agents: Array<Aggregate & { agentType: string }>;
-  categories: Array<Aggregate & { category: string }>;
-  daily: Array<{ day: string; cost: number; messages: number; tokens: number }>;
+  categories: Array<{
+    category: string;
+    messageCount: number;
+    totalTokens: number;
+  }>;
+  limits: {
+    capturedAt: number;
+    generatedAt: number | null;
+    providers: Array<{
+      provider: string;
+      account: string | null;
+      plan: string | null;
+      fetchedAt: number | null;
+      windows: Array<{
+        id: string;
+        label: string;
+        unit: string;
+        status: string;
+        used: number | null;
+        limit: number | null;
+        remaining: number | null;
+        usedFraction: number | null;
+        resetsAt: number | null;
+      }>;
+      notes: string[];
+    }>;
+  } | null;
 }
 
 const money = new Intl.NumberFormat("en-US", {
@@ -68,19 +74,15 @@ const compactNumber = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 1,
 });
 const fullNumber = new Intl.NumberFormat("en-US");
+const hiddenModels: Record<string, true> = {
+  "claude-opus-4-8": true,
+  "kimi-k2.7-code": true,
+  "kimi-k3": true,
+};
 
 function isDashboard(value: unknown): value is Dashboard {
   if (!value || typeof value !== "object") return false;
-  if (
-    !("summary" in value) ||
-    !("models" in value) ||
-    !("workspaces" in value) ||
-    !("agents" in value) ||
-    !("categories" in value) ||
-    !("daily" in value)
-  ) {
-    return false;
-  }
+  if (!("summary" in value) || !("models" in value) || !("categories" in value)) return false;
   const summary = value.summary;
   return Boolean(
     summary &&
@@ -88,18 +90,36 @@ function isDashboard(value: unknown): value is Dashboard {
       "cost" in summary &&
       typeof summary.cost === "number" &&
       Array.isArray(value.models) &&
-      Array.isArray(value.workspaces) &&
-      Array.isArray(value.agents) &&
-      Array.isArray(value.categories) &&
-      Array.isArray(value.daily),
+      Array.isArray(value.categories),
   );
 }
 
-function sessionSyncWarning(payload: unknown): string | null {
-  if (!payload || typeof payload !== "object" || !("sessionSync" in payload)) return null;
-  const sync = payload.sessionSync;
-  if (!sync || typeof sync !== "object" || !("warning" in sync)) return null;
-  return typeof sync.warning === "string" ? sync.warning : null;
+function importWarnings(payload: unknown): string[] {
+  if (!payload || typeof payload !== "object" || !("warnings" in payload)) return [];
+  if (!Array.isArray(payload.warnings)) return [];
+  return payload.warnings.filter((entry): entry is string => typeof entry === "string");
+}
+
+function formatLimitAmount(value: number | null, unit: string): string {
+  if (value === null) return "—";
+  if (unit === "usd") return preciseMoney.format(value);
+  if (unit === "percent") return `${Math.round(value)}%`;
+  return fullNumber.format(value);
+}
+
+// Zero cost with tokens spent means the provider charged nothing; a null price
+// means the model has no priced usage at all. They are not the same thing.
+function priceLabel(price: number | null): { value: string; caption: string } {
+  if (price === null) return { value: "—", caption: "not priced yet" };
+  if (price === 0) return { value: "Free", caption: "no recorded cost" };
+  return { value: preciseMoney.format(price), caption: "per 1M tokens" };
+}
+
+function limitTone(quota: { status: string; usedFraction: number | null }): string {
+  if (quota.status !== "ok") return "critical";
+  const used = quota.usedFraction ?? 0;
+  if (used >= 0.9) return "critical";
+  return used >= 0.7 ? "warn" : "safe";
 }
 
 async function requestJson(path: string, init?: RequestInit): Promise<unknown> {
@@ -121,7 +141,7 @@ export default function DashboardPage() {
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [warning, setWarning] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
 
   const loadDashboard = useCallback(async () => {
     const payload = await requestJson("/api/dashboard");
@@ -147,13 +167,13 @@ export default function DashboardPage() {
     setImporting(true);
     setError(null);
     setNotice(null);
-    setWarning(null);
+    setWarnings([]);
     try {
       const payload = await requestJson("/api/import", { method: "POST" });
       await loadDashboard();
-      const syncWarning = sessionSyncWarning(payload);
-      if (syncWarning) setWarning(syncWarning);
-      else setNotice("Oh My Pi sessions synced and usage imported successfully.");
+      const syncWarnings = importWarnings(payload);
+      setWarnings(syncWarnings);
+      if (syncWarnings.length === 0) setNotice("Oh My Pi sessions synced, limits refreshed, usage imported.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not import Oh My Pi usage");
     } finally {
@@ -161,21 +181,16 @@ export default function DashboardPage() {
     }
   }, [loadDashboard]);
 
-  const recentDays = dashboard?.daily.slice(-14) ?? [];
-  const maxDailyCost = Math.max(0, ...recentDays.map((day) => day.cost));
-  const costParts = useMemo(() => {
-    if (!dashboard) return [];
-    const input = dashboard.models.reduce((sum, model) => sum + model.inputCost, 0);
-    const output = dashboard.models.reduce((sum, model) => sum + model.outputCost, 0);
-    const cacheRead = dashboard.models.reduce((sum, model) => sum + model.cacheReadCost, 0);
-    const cacheWrite = dashboard.models.reduce((sum, model) => sum + model.cacheWriteCost, 0);
-    return [
-      { label: "Input", value: input, tone: "violet" },
-      { label: "Output", value: output, tone: "orange" },
-      { label: "Cache read", value: cacheRead, tone: "cyan" },
-      { label: "Cache write", value: cacheWrite, tone: "lime" },
-    ];
-  }, [dashboard]);
+  const limits = dashboard?.limits ?? null;
+  const models = dashboard?.models.filter((model) => !hiddenModels[model.model]) ?? [];
+  const categories = dashboard?.categories ?? [];
+  const prices = models.flatMap((model) =>
+    model.effectivePricePerMillion === null ? [] : [model.effectivePricePerMillion],
+  );
+  const priciest = prices.length === 0 ? 0 : Math.max(...prices);
+  const cheapest = prices.length === 0 ? 0 : Math.min(...prices);
+  // Extremes are only worth calling out when there is something to compare against.
+  const rankable = prices.length > 1 && priciest > cheapest;
 
   return (
     <main className="shell">
@@ -202,7 +217,9 @@ export default function DashboardPage() {
 
       {error && <div className="alert errorAlert">{error}</div>}
       {notice && <div className="alert successAlert">{notice}</div>}
-      {warning && <div className="alert warningAlert">{warning}</div>}
+      {warnings.map((entry) => (
+        <div className="alert warningAlert" key={entry}>{entry}</div>
+      ))}
 
       {loading ? (
         <section className="emptyState"><div className="spinner" /><p>Loading saved usage…</p></section>
@@ -254,126 +271,138 @@ export default function DashboardPage() {
               <small>{compactNumber.format(dashboard.summary.cacheWriteTokens)} cache writes</small>
             </article>
           </section>
-
-          <section className="splitGrid">
-            <article className="panel">
-              <div className="panelHeading">
-                <div><p className="eyebrow">LAST 14 ACTIVE DAYS</p><h2>Daily spend</h2></div>
-                <span>{recentDays.length} days</span>
-              </div>
-              <div className="barChart">
-                {recentDays.map((day) => (
-                  <div className="barRow" key={day.day}>
-                    <time dateTime={day.day}>{new Date(`${day.day}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</time>
-                    <div className="barTrack"><div className="barFill" style={{ width: `${maxDailyCost ? Math.max(2, (day.cost / maxDailyCost) * 100) : 0}%` }} /></div>
-                    <strong>{money.format(day.cost)}</strong>
-                  </div>
-                ))}
-              </div>
-            </article>
-
-            <article className="panel">
-              <div className="panelHeading"><div><p className="eyebrow">BILLING MIX</p><h2>Where cost came from</h2></div></div>
-              <div className="costList">
-                {costParts.map((part) => {
-                  const share = dashboard.summary.cost ? (part.value / dashboard.summary.cost) * 100 : 0;
-                  return (
-                    <div className="costItem" key={part.label}>
-                      <div className="costLabel"><span className={`legend ${part.tone}`} />{part.label}<strong>{money.format(part.value)}</strong></div>
-                      <div className="shareTrack"><div className={`shareFill ${part.tone}`} style={{ width: `${share}%` }} /></div>
-                      <small>{share.toFixed(1)}% of spend</small>
-                    </div>
-                  );
-                })}
-              </div>
-            </article>
-          </section>
-
           <section className="panel sectionPanel">
             <div className="panelHeading">
-              <div><p className="eyebrow">WORK CATEGORIES</p><h2>Spend by activity</h2></div>
-              <span>Estimated from user requests</span>
+              <div><p className="eyebrow">TOKEN CATEGORIES</p><h2>What the tokens worked on</h2></div>
+              <span>ESTIMATED FROM USER REQUESTS</span>
             </div>
             <div className="categoryGrid">
-              {dashboard.categories.map((category, index) => {
-                const share = dashboard.summary.cost
-                  ? (category.cost / dashboard.summary.cost) * 100
+              {categories.map((category, index) => {
+                const share = dashboard.summary.totalTokens
+                  ? (category.totalTokens / dashboard.summary.totalTokens) * 100
                   : 0;
                 return (
-                  <article className="categoryCard" key={category.category}>
-                    <div className="categoryTop">
+                  <article className={`categoryCard tone${index % 4}`} key={category.category}>
+                    <div className="categoryCardTop">
                       <span>{String(index + 1).padStart(2, "0")}</span>
-                      <strong>{money.format(category.cost)}</strong>
+                      <strong>{share.toFixed(1)}%</strong>
                     </div>
                     <h3>{category.category}</h3>
-                    <p>{fullNumber.format(category.messageCount)} messages · {compactNumber.format(category.totalTokens)} tokens</p>
-                    <div className="categoryTrack">
+                    <p>{compactNumber.format(category.totalTokens)} tokens · {fullNumber.format(category.messageCount)} messages</p>
+                    <div className="categoryTrack" aria-hidden="true">
                       <div style={{ width: `${share}%` }} />
                     </div>
-                    <small>{share.toFixed(1)}% of total spend</small>
                   </article>
                 );
               })}
             </div>
           </section>
 
+
+          <section className="panel sectionPanel" aria-label="Provider limits">
+            <div className="panelHeading">
+              <div><p className="eyebrow">PROVIDER QUOTAS</p><h2>Account limits</h2></div>
+              <span>{limits ? `Read ${new Date(limits.capturedAt).toLocaleString()}` : "Not read yet"}</span>
+            </div>
+            {!limits || limits.providers.length === 0 ? (
+              <p className="limitNote">No authenticated accounts reported limits. Fetch reads <code>omp usage --json</code>.</p>
+            ) : (
+              <div className="limitGrid">
+                {limits.providers.map((provider) => (
+                  <article className="limitCard" key={`${provider.provider}/${provider.account ?? "default"}`}>
+                    <div className="limitCardTop">
+                      <strong>{provider.provider}</strong>
+                      {provider.plan && <span className="limitPlan">{provider.plan}</span>}
+                    </div>
+                    <small>{provider.account ?? "single account"}</small>
+                    {provider.windows.length === 0 ? (
+                      <p className="limitNote">{provider.notes[0] ?? "This provider exposes no quota API."}</p>
+                    ) : (
+                      <div className="limitRows">
+                        {provider.windows.map((quota) => {
+                          const tone = limitTone(quota);
+                          const share = quota.usedFraction === null
+                            ? 0
+                            : Math.min(100, Math.max(0, quota.usedFraction * 100));
+                          return (
+                            <div className="limitRow" key={quota.id}>
+                              <div className="limitRowTop">
+                                <span>{quota.label}</span>
+                                <strong className={tone}>
+                                  {formatLimitAmount(quota.used, quota.unit)}
+                                  {quota.limit === null ? "" : ` / ${formatLimitAmount(quota.limit, quota.unit)}`}
+                                </strong>
+                              </div>
+                              <div className="limitTrack">
+                                <div className={`limitFill ${tone}`} style={{ width: `${share}%` }} />
+                              </div>
+                              <small>
+                                {quota.remaining === null ? "" : `${formatLimitAmount(quota.remaining, quota.unit)} left`}
+                                {quota.resetsAt === null ? "" : ` · resets ${new Date(quota.resetsAt).toLocaleString()}`}
+                                {quota.status === "ok" ? "" : ` · ${quota.status}`}
+                              </small>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
           <section className="panel sectionPanel">
             <div className="panelHeading">
               <div><p className="eyebrow">MODEL ECONOMICS</p><h2>Usage and effective price</h2></div>
-              <span>USD per 1M tokens</span>
+              <span>RING = SHARE OF SPEND · BAR = PRICE VS PRICIEST</span>
             </div>
-            <div className="tableWrap">
-              <table>
-                <thead><tr><th>Model</th><th>Spend</th><th>Tokens</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th></tr></thead>
-                <tbody>
-                  {dashboard.models.map((model) => (
-                    <tr key={`${model.provider}/${model.model}`}>
-                      <td>
-                        <strong>{model.model}</strong>
-                        <small>
-                          {model.provider}
-                          {model.model.toLowerCase() === "minimax-m3" ? " · MiniMax estimate" : ""}
-                        </small>
-                      </td>
-                      <td className="moneyCell">{money.format(model.cost)}</td>
-                      <td>{compactNumber.format(model.totalTokens)}<small>{fullNumber.format(model.messageCount)} messages</small></td>
-                      <td>{model.inputPricePerMillion === null ? "—" : preciseMoney.format(model.inputPricePerMillion)}</td>
-                      <td>{model.outputPricePerMillion === null ? "—" : preciseMoney.format(model.outputPricePerMillion)}</td>
-                      <td>{model.cacheReadPricePerMillion === null ? "—" : preciseMoney.format(model.cacheReadPricePerMillion)}</td>
-                      <td>{model.cacheWritePricePerMillion === null ? "—" : preciseMoney.format(model.cacheWritePricePerMillion)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="modelDeck">
+              {models.map((model, index) => {
+                const price = model.effectivePricePerMillion;
+                const label = priceLabel(price);
+                const share = dashboard.summary.cost ? (model.cost / dashboard.summary.cost) * 100 : 0;
+                const priceShare = priciest > 0 && price !== null ? (price / priciest) * 100 : 0;
+                const badge = !rankable || price === null
+                  ? null
+                  : price === priciest
+                    ? "Priciest"
+                    : price === cheapest
+                      ? "Best value"
+                      : null;
+                return (
+                  <article className={`modelCard tone${index % 4}`} key={`${model.provider}/${model.model}`}>
+                    <div className="modelCardTop">
+                      <span className="modelRank">{String(index + 1).padStart(2, "0")}</span>
+                      {badge && <span className="modelBadge">{badge}</span>}
+                    </div>
+
+                    <div className="modelRing" style={{ "--share": share } as CSSProperties}>
+                      <div className="modelRingTrack" />
+                      <div className="modelRingValue">
+                        <strong>{label.value}</strong>
+                        <small>{label.caption}</small>
+                      </div>
+                    </div>
+
+                    <h3>{model.model}</h3>
+                    <p className="modelProvider">
+                      {model.provider}
+                      {model.model.toLowerCase() === "minimax-m3" ? " · estimated" : ""}
+                    </p>
+
+                    <div className="modelSpend">
+                      <strong>{money.format(model.cost)}</strong>
+                      {share >= 0.05 && <span>{share.toFixed(1)}% of spend</span>}
+                    </div>
+
+                    <div className="priceMeter" aria-hidden="true">
+                      <div style={{ width: `${priceShare}%` }} />
+                    </div>
+                  </article>
+                );
+              })}
             </div>
-          </section>
-
-          <section className="splitGrid lowerGrid">
-            <article className="panel">
-              <div className="panelHeading"><div><p className="eyebrow">WORKSPACES</p><h2>Spend by project</h2></div><span>{dashboard.workspaces.length} tracked</span></div>
-              <div className="rankList">
-                {dashboard.workspaces.map((workspace, index) => (
-                  <div className="rankRow" key={workspace.folder}>
-                    <span className="rank">{String(index + 1).padStart(2, "0")}</span>
-                    <div className="rankName"><strong>{workspace.folder.replace(/^-/, "").replaceAll("-", " · ")}</strong><small>{workspace.sessionCount} sessions · {compactNumber.format(workspace.totalTokens)} tokens</small></div>
-                    <div className="rankSpend"><strong>{money.format(workspace.cost)}</strong><small>{dashboard.summary.cost ? ((workspace.cost / dashboard.summary.cost) * 100).toFixed(1) : "0.0"}%</small></div>
-                  </div>
-                ))}
-              </div>
-            </article>
-
-            <article className="panel">
-              <div className="panelHeading"><div><p className="eyebrow">PROCESSES</p><h2>Spend by agent type</h2></div></div>
-              <div className="agentGrid">
-                {dashboard.agents.map((agent) => (
-                  <div className="agentCard" key={agent.agentType}>
-                    <span>{agent.agentType.replaceAll("_", " ")}</span>
-                    <strong>{money.format(agent.cost)}</strong>
-                    <small>{fullNumber.format(agent.messageCount)} messages · {compactNumber.format(agent.totalTokens)} tokens</small>
-                  </div>
-                ))}
-              </div>
-            </article>
           </section>
         </>
       )}

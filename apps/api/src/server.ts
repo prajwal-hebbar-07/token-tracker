@@ -1,6 +1,6 @@
 import { createServer, type ServerResponse } from "node:http";
-import { getDashboard, type ImportResult, importFromOmp, openTrackerDatabase } from "./db.js";
-import { syncOmpSessions } from "./omp-sync.js";
+import { getDashboard, type ImportResult, importFromOmp, openTrackerDatabase, saveLimitsSnapshot } from "./db.js";
+import { readProviderLimits, syncOmpSessions } from "./omp-cli.js";
 
 const host = process.env.HOST ?? "127.0.0.1";
 const port = Number(process.env.PORT ?? 4000);
@@ -17,7 +17,7 @@ function sendJson(response: ServerResponse, status: number, payload: unknown): v
   response.end(JSON.stringify(payload));
 }
 
-const server = createServer((request, response) => {
+const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? `${host}:${port}`}`);
 
   if (request.method === "OPTIONS") {
@@ -37,16 +37,24 @@ const server = createServer((request, response) => {
     }
 
     if (request.method === "POST" && url.pathname === "/api/import") {
-      const sessionSync = syncOmpSessions();
+      const warnings: string[] = [];
+      const syncWarning = syncOmpSessions();
+      if (syncWarning) warnings.push(syncWarning);
+
       let result: ImportResult;
       try {
         result = importFromOmp(tracker);
       } catch (error) {
-        if (!sessionSync.warning) throw error;
+        if (!syncWarning) throw error;
         const message = error instanceof Error ? error.message : "Import failed";
-        throw new Error(`${message} (session sync also failed: ${sessionSync.warning})`);
+        throw new Error(`${message} (session sync also failed: ${syncWarning})`);
       }
-      sendJson(response, 200, { result, sessionSync, dashboard: getDashboard(tracker) });
+
+      const limits = await readProviderLimits();
+      if (limits.warning) warnings.push(limits.warning);
+      if (limits.snapshot) saveLimitsSnapshot(tracker, limits.snapshot);
+
+      sendJson(response, 200, { result, warnings, dashboard: getDashboard(tracker) });
       return;
     }
 
