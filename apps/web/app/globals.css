@@ -53,7 +53,6 @@ button:focus-visible {
   align-items: center;
   justify-content: space-between;
   min-height: 96px;
-  border-bottom: 1px solid var(--line);
 }
 
 .brand,
@@ -191,11 +190,7 @@ h2 {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin: 0 -36px;
-  padding: 14px 36px;
-  border-bottom: 1px solid var(--line);
-  background: rgba(11, 12, 15, 0.88);
-  backdrop-filter: blur(14px);
+  padding: 14px 0;
 }
 
 .periodTabs {
@@ -1056,11 +1051,6 @@ h2 {
   .limitGrid {
     grid-template-columns: 1fr;
   }
-
-  .controlBar {
-    margin: 0 -22px;
-    padding: 14px 22px;
-  }
 }
 
 @media (max-width: 680px) {
@@ -1120,8 +1110,7 @@ h2 {
   .controlBar {
     flex-wrap: wrap;
     gap: 10px;
-    margin: 0 -14px;
-    padding: 12px 14px;
+    padding: 12px 0;
   }
 
   .appNav,
