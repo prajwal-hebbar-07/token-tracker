@@ -6,7 +6,10 @@
   "build": {
     "frontendDist": "../../web/out",
     "beforeBuildCommand": "pnpm --filter @token-tracker/web run build",
-    "beforeDevCommand": "pnpm --filter @token-tracker/web run build"
+    "beforeDevCommand": {
+      "script": "pnpm --filter @token-tracker/web run build",
+      "wait": true
+    }
   },
   "app": {
     "windows": [],
