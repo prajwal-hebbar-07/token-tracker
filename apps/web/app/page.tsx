@@ -2,6 +2,7 @@
 
 import { type CSSProperties, useCallback, useEffect, useState } from "react";
 import { compactNumber, fullNumber, hiddenModels, money, preciseMoney, priceLabel, requestJson } from "./lib";
+import { LimitFilter, limitKey, useHiddenLimits } from "./limit-filter";
 import { AppNav } from "./nav";
 import { type Period, PeriodTabs, usePeriod } from "./period";
 
@@ -108,6 +109,7 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
+  const { hidden, setKeysHidden, showEvery } = useHiddenLimits();
 
   const loadDashboard = useCallback(async (): Promise<Dashboard> => {
     const payload = await requestJson(`/api/dashboard?period=${period}`);
@@ -154,6 +156,13 @@ export default function DashboardPage() {
   }, [loadDashboard]);
 
   const limits = dashboard?.limits ?? null;
+  // A card whose every window is hidden has nothing left to say, so it goes too.
+  const visibleProviders = (limits?.providers ?? []).flatMap((provider) => {
+    const windows = provider.windows.filter(
+      (quota) => !hidden[limitKey(provider.provider, provider.account, quota.id)],
+    );
+    return windows.length === 0 && provider.windows.length > 0 ? [] : [{ ...provider, windows }];
+  });
   const models = dashboard?.models.filter((model) => !hiddenModels[model.model]) ?? [];
   const categories = dashboard?.categories ?? [];
   const prices = models.flatMap((model) =>
@@ -289,13 +298,25 @@ export default function DashboardPage() {
           <section className="panel sectionPanel" aria-label="Provider limits">
             <div className="panelHeading">
               <div><p className="eyebrow">PROVIDER QUOTAS</p><h2>Account limits</h2></div>
-              <span>{limits ? `Read ${new Date(limits.capturedAt).toLocaleString()}` : "Not read yet"}</span>
+              <div className="panelHeadingSide">
+                <span>{limits ? `Read ${new Date(limits.capturedAt).toLocaleString()}` : "Not read yet"}</span>
+                {limits && limits.providers.length > 0 && (
+                  <LimitFilter
+                    providers={limits.providers}
+                    hidden={hidden}
+                    setKeysHidden={setKeysHidden}
+                    showEvery={showEvery}
+                  />
+                )}
+              </div>
             </div>
             {!limits || limits.providers.length === 0 ? (
               <p className="limitNote">No authenticated accounts reported limits. Fetch reads <code>omp usage --json</code>.</p>
+            ) : visibleProviders.length === 0 ? (
+              <p className="limitNote">Every quota is hidden. Use <em>Visible limits</em> above to bring some back.</p>
             ) : (
               <div className="limitGrid">
-                {limits.providers.map((provider) => (
+                {visibleProviders.map((provider) => (
                   <article className="limitCard" key={`${provider.provider}/${provider.account ?? "default"}`}>
                     <div className="limitCardTop">
                       <strong>{provider.provider}</strong>

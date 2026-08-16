@@ -59,6 +59,14 @@ The API serves `GET /api/dashboard?period=today|month|all` for the dashboard and
 `POST /api/import` for the fetch button. All three default to the whole history
 when no period is given.
 
+The **Account limits** panel has a *Visible limits* control in its header for
+choosing which quotas to display. Each quota is addressed by provider, account
+and window, because the same provider can appear twice under two different
+accounts and still report identically named windows. Hiding every window of a
+provider removes its card from the panel. The choice lives in the browser under
+the `localStorage` key `token-tracker.hidden-limits`, so it is per-browser, it
+survives reloads, and it never reaches the API or the database.
+
 ## Configuration
 
 | Variable | Default | Purpose |

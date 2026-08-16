@@ -352,10 +352,142 @@ h2 {
   margin-bottom: 26px;
 }
 
-.panelHeading > span {
+.panelHeading > span,
+.panelHeadingSide > span {
   color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 10px;
+}
+
+.panelHeadingSide {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.limitFilter {
+  position: relative;
+}
+
+.limitFilter > summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-strong);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  list-style: none;
+}
+
+.limitFilter > summary::-webkit-details-marker {
+  display: none;
+}
+
+.limitFilter > summary:hover,
+.limitFilter[open] > summary {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--lime) 40%, var(--line));
+}
+
+.limitFilterCount {
+  padding: 2px 7px;
+  border-radius: 100px;
+  background: rgba(200, 243, 106, 0.16);
+  color: var(--lime);
+  font-size: 10px;
+}
+
+.limitFilterMenu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  width: 272px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--panel-strong);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+}
+
+.limitFilterTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.limitFilterTop strong {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.limitFilterTop button {
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.limitFilterTop button:hover:not(:disabled) {
+  color: var(--lime);
+  border-color: color-mix(in srgb, var(--lime) 40%, var(--line));
+}
+
+.limitFilterTop button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.limitFilterGroup + .limitFilterGroup {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.limitFilterOption {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 0 5px 22px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.limitFilterOption.group {
+  padding-left: 0;
+  font-weight: 700;
+}
+
+.limitFilterOption input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--lime);
+  cursor: pointer;
+}
+
+.limitFilterOption small {
+  display: block;
+  margin-top: 1px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 400;
 }
 
 .sectionPanel {
