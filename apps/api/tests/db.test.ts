@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { getDashboard, getProjects, importFromOmp, openTrackerDatabase, saveLimitsSnapshot } from "../src/db.js";
 
-function writeSession(filePath: string, userText: string, entryIds: string[]): void {
+function writeSession(filePath: string, userText: string, entryIds: string[], cwd?: string): void {
   const lines: string[] = [];
+  if (cwd !== undefined) lines.push(JSON.stringify({ type: "session", cwd }));
   lines.push(JSON.stringify({ id: "user-request", message: { role: "user", content: userText } }));
   for (const entryId of entryIds) {
     lines.push(JSON.stringify({ id: entryId, parentId: "user-request" }));
@@ -15,12 +16,13 @@ function writeSession(filePath: string, userText: string, entryIds: string[]): v
   writeFileSync(filePath, lines.join("\n") + "\n");
 }
 
+const alphaWorkspace = join(homedir(), "code", "demo-app");
 function createSourceDatabase(filePath: string): DatabaseSync {
   const source = new DatabaseSync(filePath);
   const directory = dirname(filePath);
   const session1 = join(directory, "session-1.jsonl");
   const session2 = join(directory, "session-2.jsonl");
-  writeSession(session1, "Design a responsive settings page with clear visual hierarchy.", ["entry-1", "entry-2"]);
+  writeSession(session1, "Design a responsive settings page with clear visual hierarchy.", ["entry-1", "entry-2"], alphaWorkspace);
   writeSession(session2, "Fix the database migration bug that is failing.", ["entry-3"]);
   writeSession(join(directory, "session-3.jsonl"), "Investigate competing model capabilities on their website.", ["entry-4"]);
   writeSession(join(directory, "session-4.jsonl"), "Reason about the best architecture and tradeoffs.", ["entry-5"]);
@@ -357,7 +359,8 @@ test("rolls usage up per project with a per-model breakdown", () => {
     assert.deepEqual(report.projects.map((entry) => entry.folder), ["workspace-alpha", "workspace-beta"]);
 
     const alpha = report.projects[0];
-    assert.equal(alpha.name, "workspace-alpha");
+    assert.equal(alpha.path, alphaWorkspace);
+    assert.equal(alpha.name, "code/demo-app");
     assertClose(alpha.cost, 0.056);
     assert.equal(alpha.totalTokens, 13_300);
     assert.equal(alpha.inputTokens, 3_000);
@@ -377,6 +380,7 @@ test("rolls usage up per project with a per-model breakdown", () => {
     assertClose(alpha.models[0].cost, 0.056);
 
     const beta = report.projects[1];
+    assert.equal(beta.path, null);
     assert.equal(beta.name, "workspace-beta");
     assertClose(beta.cost, 0.0015);
     assert.equal(beta.totalTokens, 550);

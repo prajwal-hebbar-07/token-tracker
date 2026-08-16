@@ -23,6 +23,7 @@ interface ProjectsReport {
   }>;
   projects: Array<{
     folder: string;
+    path: string | null;
     name: string;
     cost: number;
     totalTokens: number;
@@ -72,6 +73,17 @@ function lastActive(timestamp: number | null): string {
   if (days === 1) return "active yesterday";
   if (days < 30) return `active ${days} days ago`;
   return `last active ${new Date(timestamp).toLocaleDateString()}`;
+}
+
+// Directory names are lowercase and hyphenated on disk; the card reads better
+// with them spelled out, so "chaotic-thoughts" becomes "Chaotic Thoughts".
+function titleCase(segment: string): string {
+  return segment
+    .replace(/[-_]+/g, " ")
+    .split(" ")
+    .filter((word) => word.length > 0)
+    .map((word) => word[0].toUpperCase() + word.slice(1))
+    .join(" ");
 }
 
 export default function ProjectsPage() {
@@ -233,6 +245,9 @@ export default function ProjectsPage() {
                 const label = priceLabel(project.effectivePricePerMillion);
                 const visibleModels = project.models.filter((entry) => !hiddenModels[entry.model]);
                 const modelTotal = visibleModels.reduce((sum, entry) => sum + entry.cost, 0);
+                const segments = project.name.split("/").filter((segment) => segment.length > 0);
+                const leaf = segments.length === 0 ? project.name : segments[segments.length - 1];
+                const parents = segments.slice(0, -1);
                 return (
                   <article className={`projectCard tone${index % 4}`} key={project.folder}>
                     <div className="projectCardTop">
@@ -242,8 +257,15 @@ export default function ProjectsPage() {
                       )}
                     </div>
 
-                    <h3 className="projectName" title={project.folder}>{project.name}</h3>
-                    <p className="projectMeta">{lastActive(project.lastMessageAt)}</p>
+                    <div className="projectIdentity">
+                      {parents.length > 0 && (
+                        <p className="projectPath">{parents.map(titleCase).join(" / ")}</p>
+                      )}
+                      <h3 className="projectName" title={project.path ?? project.folder}>
+                        {titleCase(leaf)}
+                      </h3>
+                      <p className="projectMeta">{lastActive(project.lastMessageAt)}</p>
+                    </div>
 
                     <div className="projectHeadline">
                       <div className="modelRing" style={{ "--share": share } as CSSProperties}>

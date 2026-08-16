@@ -40,6 +40,7 @@ interface UsageRow {
   agent_type: string;
   cost_no_cache_input: number | null;
   category?: UsageCategory;
+  project_path?: string | null;
 }
 
 export interface Dashboard {
@@ -94,6 +95,7 @@ export interface ProjectsReport {
   }>;
   projects: Array<{
     folder: string;
+    path: string | null;
     name: string;
     cost: number;
     totalTokens: number;
@@ -200,9 +202,15 @@ function extractUserText(message: unknown): string | null {
   return text.length === 0 ? null : text.join("\n");
 }
 
-function readSessionNodes(sessionFile: string): Map<string, SessionNode> {
+interface SessionFile {
+  cwd: string | null;
+  nodes: Map<string, SessionNode>;
+}
+
+function readSessionFile(sessionFile: string): SessionFile {
   const nodes = new Map<string, SessionNode>();
-  if (!existsSync(sessionFile)) return nodes;
+  let cwd: string | null = null;
+  if (!existsSync(sessionFile)) return { cwd, nodes };
 
   for (const line of readFileSync(sessionFile, "utf8").split("\n")) {
     if (line.length === 0) continue;
@@ -213,16 +221,22 @@ function readSessionNodes(sessionFile: string): Map<string, SessionNode> {
       // An active session can end with a partially written JSONL record.
       continue;
     }
-    if (!entry || typeof entry !== "object" || !("id" in entry) || typeof entry.id !== "string") {
-      continue;
+    if (!entry || typeof entry !== "object") continue;
+
+    // The session header carries the real working directory. The folder column
+    // only holds a slug where "/" and "-" both became "-", so the directory
+    // boundaries cannot be recovered from it.
+    if (cwd === null && "cwd" in entry && typeof entry.cwd === "string" && entry.cwd.length > 0) {
+      cwd = entry.cwd;
     }
+    if (!("id" in entry) || typeof entry.id !== "string") continue;
 
     const parentId =
       "parentId" in entry && typeof entry.parentId === "string" ? entry.parentId : null;
     const userText = "message" in entry ? extractUserText(entry.message) : null;
     nodes.set(entry.id, { parentId, userText });
   }
-  return nodes;
+  return { cwd, nodes };
 }
 
 function classifyEntry(entryId: string, nodes: Map<string, SessionNode>): UsageCategory {
@@ -289,6 +303,7 @@ export function openTrackerDatabase(filePath = getTrackerDatabasePath()): Databa
       agent_type TEXT NOT NULL,
       cost_no_cache_input REAL,
       category TEXT NOT NULL,
+      project_path TEXT,
       imported_at INTEGER NOT NULL,
       PRIMARY KEY (session_file, entry_id)
     ) WITHOUT ROWID;
@@ -320,6 +335,9 @@ export function openTrackerDatabase(filePath = getTrackerDatabasePath()): Databa
   if (!columns.some((column) => column.name === "category")) {
     db.exec("ALTER TABLE usage_messages ADD COLUMN category TEXT NOT NULL DEFAULT 'Logic & planning'");
   }
+  if (!columns.some((column) => column.name === "project_path")) {
+    db.exec("ALTER TABLE usage_messages ADD COLUMN project_path TEXT");
+  }
   db.exec("CREATE INDEX IF NOT EXISTS usage_category_idx ON usage_messages(category)");
   return db;
 }
@@ -337,14 +355,23 @@ export function importFromOmp(
 
   try {
     const rows = source.prepare(`SELECT ${usageColumns} FROM messages ORDER BY id`).all() as unknown as UsageRow[];
-    const sessionNodes = new Map<string, Map<string, SessionNode>>();
+    const sessionFiles = new Map<string, SessionFile>();
+    // Subagent transcripts carry no session header, so the working directory is
+    // resolved per folder: any session that recorded one speaks for the slug.
+    const pathByFolder = new Map<string, string>();
     for (const row of rows) {
-      let nodes = sessionNodes.get(row.session_file);
-      if (!nodes) {
-        nodes = readSessionNodes(row.session_file);
-        sessionNodes.set(row.session_file, nodes);
+      let session = sessionFiles.get(row.session_file);
+      if (!session) {
+        session = readSessionFile(row.session_file);
+        sessionFiles.set(row.session_file, session);
       }
-      row.category = classifyEntry(row.entry_id, nodes);
+      row.category = classifyEntry(row.entry_id, session.nodes);
+      if (session.cwd !== null && !pathByFolder.has(row.folder)) {
+        pathByFolder.set(row.folder, session.cwd);
+      }
+    }
+    for (const row of rows) {
+      row.project_path = pathByFolder.get(row.folder) ?? null;
     }
     const beforeRow = tracker.prepare("SELECT COUNT(*) AS count FROM usage_messages").get();
     if (!beforeRow || typeof beforeRow.count !== "number") {
@@ -353,9 +380,9 @@ export function importFromOmp(
     const before = beforeRow.count;
     const upsert = tracker.prepare(`
       INSERT INTO usage_messages (
-        ${usageColumns}, category, imported_at
+        ${usageColumns}, category, project_path, imported_at
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
       ON CONFLICT(session_file, entry_id) DO UPDATE SET
         folder = excluded.folder,
@@ -381,6 +408,7 @@ export function importFromOmp(
         agent_type = excluded.agent_type,
         cost_no_cache_input = excluded.cost_no_cache_input,
         category = excluded.category,
+        project_path = excluded.project_path,
         imported_at = excluded.imported_at
     `);
 
@@ -433,6 +461,7 @@ export function importFromOmp(
           row.agent_type,
           costNoCacheInput,
           row.category ?? "Logic & planning",
+          row.project_path ?? null,
           startedAt,
         );
       }
@@ -637,10 +666,21 @@ export function getDashboard(
   };
 }
 
-// Oh My Pi records the working directory as a slug where both "/" and "-" became
-// "-", so the original path cannot be recovered. Strip the leading separator and
-// show the slug as it is rather than guessing where the directory boundaries were.
-function projectName(folder: string): string {
+// Oh My Pi records the working directory twice: as a slug where both "/" and
+// "-" became "-", and verbatim in the session header. Prefer the real path,
+// trimmed to the part below the home directory, because the slug alone cannot
+// say where one directory ended and the next began.
+function projectName(folder: string, path: string | null): string {
+  if (path !== null) {
+    const home = homedir();
+    const relative = path === home
+      ? ""
+      : path.startsWith(`${home}/`)
+        ? path.slice(home.length + 1)
+        : path.replace(/^\/+/, "");
+    if (relative !== "") return relative;
+  }
+
   const trimmed = folder.replace(/^[-/]+/, "").replace(/\/+$/, "");
   return trimmed === "" ? "(no workspace)" : trimmed;
 }
@@ -654,6 +694,7 @@ export function getProjects(
   const rows = tracker.prepare(`
     SELECT
       folder,
+      MAX(project_path) AS path,
       COUNT(*) AS messageCount,
       COUNT(DISTINCT session_file) AS sessionCount,
       SUM(input_tokens) AS inputTokens,
@@ -670,6 +711,7 @@ export function getProjects(
     ORDER BY cost DESC, totalTokens DESC
   `).all(...range.parameters) as unknown as Array<{
     folder: string;
+    path: string | null;
     messageCount: number;
     sessionCount: number;
     inputTokens: number | null;
@@ -746,7 +788,8 @@ export function getProjects(
     const totalTokens = numberOrZero(row.totalTokens);
     return {
       folder: row.folder,
-      name: projectName(row.folder),
+      path: row.path,
+      name: projectName(row.folder, row.path),
       cost,
       totalTokens,
       inputTokens: numberOrZero(row.inputTokens),
