@@ -57,6 +57,14 @@ interface Dashboard {
   } | null;
 }
 
+type DashboardPeriod = "today" | "month" | "all";
+
+const periods: Array<{ value: DashboardPeriod; label: string; eyebrow: string }> = [
+  { value: "today", label: "Today", eyebrow: "TODAY'S SPEND" },
+  { value: "month", label: "This month", eyebrow: "CURRENT MONTH SPEND" },
+  { value: "all", label: "All time", eyebrow: "ALL-TIME SPEND" },
+];
+
 const money = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
@@ -137,21 +145,28 @@ async function requestJson(path: string, init?: RequestInit): Promise<unknown> {
 
 export default function DashboardPage() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
+  const [period, setPeriod] = useState<DashboardPeriod>("month");
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
 
-  const loadDashboard = useCallback(async () => {
-    const payload = await requestJson("/api/dashboard");
+  const loadDashboard = useCallback(async (): Promise<Dashboard> => {
+    const payload = await requestJson(`/api/dashboard?period=${period}`);
     if (!isDashboard(payload)) throw new Error("The API returned an invalid dashboard response");
-    setDashboard(payload);
-  }, []);
+    return payload;
+  }, [period]);
 
   useEffect(() => {
     let active = true;
+    setDashboard(null);
+    setLoading(true);
+    setError(null);
     loadDashboard()
+      .then((payload) => {
+        if (active) setDashboard(payload);
+      })
       .catch((reason: unknown) => {
         if (active) setError(reason instanceof Error ? reason.message : "Could not load the dashboard");
       })
@@ -170,7 +185,7 @@ export default function DashboardPage() {
     setWarnings([]);
     try {
       const payload = await requestJson("/api/import", { method: "POST" });
-      await loadDashboard();
+      setDashboard(await loadDashboard());
       const syncWarnings = importWarnings(payload);
       setWarnings(syncWarnings);
       if (syncWarnings.length === 0) setNotice("Oh My Pi sessions synced, limits refreshed, usage imported.");
@@ -209,7 +224,7 @@ export default function DashboardPage() {
               ? `Last fetched ${new Date(dashboard.lastSync.completedAt).toLocaleString()}`
               : "Not fetched yet"}
           </div>
-          <button className="fetchButton" type="button" onClick={fetchUsage} disabled={importing}>
+          <button className="fetchButton" type="button" onClick={fetchUsage} disabled={loading || importing}>
             {importing ? "Fetching…" : "Fetch Oh My Pi data"}
           </button>
         </div>
@@ -221,13 +236,34 @@ export default function DashboardPage() {
         <div className="alert warningAlert" key={entry}>{entry}</div>
       ))}
 
+      <div className="periodTabs" aria-label="Usage period">
+        {periods.map((option) => (
+          <button
+            type="button"
+            aria-pressed={period === option.value}
+            className={period === option.value ? "active" : undefined}
+            disabled={importing}
+            key={option.value}
+            onClick={() => setPeriod(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+
       {loading ? (
         <section className="emptyState"><div className="spinner" /><p>Loading saved usage…</p></section>
-      ) : !dashboard || dashboard.summary.messageCount === 0 ? (
+      ) : !dashboard ? (
         <section className="emptyState">
-          <p className="emptyKicker">NO SAVED USAGE</p>
-          <h2>Your local ledger is empty.</h2>
-          <p>Fetch reads <code>~/.omp/stats.db</code> once and saves a snapshot in this app. Nothing runs in the background.</p>
+          <p className="emptyKicker">USAGE UNAVAILABLE</p>
+          <h2>Could not load this period.</h2>
+          <p>Use the fetch button above to update the saved data and try again.</p>
+        </section>
+      ) : dashboard.summary.messageCount === 0 ? (
+        <section className="emptyState">
+          <p className="emptyKicker">NO USAGE THIS PERIOD</p>
+          <h2>No usage recorded for {period === "today" ? "today" : period === "month" ? "this month" : "all time"}.</h2>
+          <p>Fetch reads <code>~/.omp/stats.db</code> and updates the saved snapshot in this app.</p>
           <button className="fetchButton large" type="button" onClick={fetchUsage} disabled={importing}>
             {importing ? "Fetching…" : "Fetch usage now"}
           </button>
@@ -236,12 +272,16 @@ export default function DashboardPage() {
         <>
           <section className="hero">
             <div>
-              <p className="eyebrow">RECORDED SPEND</p>
+              <p className="eyebrow">{periods.find((option) => option.value === period)?.eyebrow}</p>
               <div className="totalSpend">{money.format(dashboard.summary.cost)}</div>
               <p className="range">
-                {dashboard.summary.firstMessageAt
-                  ? `${new Date(dashboard.summary.firstMessageAt).toLocaleDateString()} — ${new Date(dashboard.summary.lastMessageAt ?? dashboard.generatedAt).toLocaleDateString()}`
-                  : "No dated messages"}
+                {period === "today"
+                  ? `Today · ${new Date(dashboard.generatedAt).toLocaleDateString()}`
+                  : period === "month"
+                    ? new Date(dashboard.generatedAt).toLocaleDateString(undefined, { month: "long", year: "numeric" })
+                    : dashboard.summary.firstMessageAt
+                      ? `${new Date(dashboard.summary.firstMessageAt).toLocaleDateString()} — ${new Date(dashboard.summary.lastMessageAt ?? dashboard.generatedAt).toLocaleDateString()}`
+                      : "No dated messages"}
               </p>
             </div>
             <div className="heroNote">

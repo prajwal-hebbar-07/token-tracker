@@ -1,5 +1,11 @@
 import { createServer, type ServerResponse } from "node:http";
-import { getDashboard, type ImportResult, importFromOmp, openTrackerDatabase, saveLimitsSnapshot } from "./db.js";
+import {
+  getDashboard,
+  type ImportResult,
+  importFromOmp,
+  openTrackerDatabase,
+  saveLimitsSnapshot,
+} from "./db.js";
 import { readProviderLimits, syncOmpSessions } from "./omp-cli.js";
 
 const host = process.env.HOST ?? "127.0.0.1";
@@ -32,7 +38,12 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/dashboard") {
-      sendJson(response, 200, getDashboard(tracker));
+      const period = url.searchParams.get("period") ?? "all";
+      if (period !== "today" && period !== "month" && period !== "all") {
+        sendJson(response, 400, { error: "period must be today, month, or all" });
+        return;
+      }
+      sendJson(response, 200, getDashboard(tracker, period));
       return;
     }
 

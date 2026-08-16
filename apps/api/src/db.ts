@@ -12,6 +12,8 @@ export interface ImportResult {
   completedAt: number;
 }
 
+export type DashboardPeriod = "today" | "month" | "all";
+
 interface UsageRow {
   session_file: string;
   entry_id: string;
@@ -433,6 +435,30 @@ function pricePerMillion(cost: number, tokens: number): number | null {
   return tokens === 0 ? null : (cost / tokens) * 1_000_000;
 }
 
+function usageRange(period: DashboardPeriod, now: number): { where: string; parameters: number[] } {
+  if (period === "all") return { where: "", parameters: [] };
+
+  const start = new Date(now);
+  if (period === "today") {
+    start.setHours(0, 0, 0, 0);
+  } else {
+    start.setDate(1);
+    start.setHours(0, 0, 0, 0);
+  }
+
+  const end = new Date(start);
+  if (period === "today") {
+    end.setDate(end.getDate() + 1);
+  } else {
+    end.setMonth(end.getMonth() + 1);
+  }
+
+  return {
+    where: "WHERE timestamp >= ? AND timestamp < ?",
+    parameters: [start.getTime(), end.getTime()],
+  };
+}
+
 export function saveLimitsSnapshot(tracker: DatabaseSync, snapshot: LimitsSnapshot): void {
   tracker.prepare(`
     INSERT INTO limit_snapshots (id, captured_at, payload) VALUES (1, ?, ?)
@@ -455,7 +481,12 @@ function readLimitsSnapshot(tracker: DatabaseSync): LimitsSnapshot | null {
   return typeof snapshot.capturedAt === "number" && Array.isArray(snapshot.providers) ? snapshot : null;
 }
 
-export function getDashboard(tracker: DatabaseSync): Dashboard {
+export function getDashboard(
+  tracker: DatabaseSync,
+  period: DashboardPeriod = "all",
+  now = Date.now(),
+): Dashboard {
+  const range = usageRange(period, now);
   const summary = tracker.prepare(`
     SELECT
       COUNT(*) AS messageCount,
@@ -469,7 +500,8 @@ export function getDashboard(tracker: DatabaseSync): Dashboard {
       MIN(timestamp) AS firstMessageAt,
       MAX(timestamp) AS lastMessageAt
     FROM usage_messages
-  `).get() as {
+    ${range.where}
+  `).get(...range.parameters) as {
     messageCount: number;
     sessionCount: number;
     inputTokens: number | null;
@@ -489,9 +521,10 @@ export function getDashboard(tracker: DatabaseSync): Dashboard {
       SUM(cost_total) AS cost,
       SUM(total_tokens) AS totalTokens
     FROM usage_messages
+    ${range.where}
     GROUP BY model, provider
     ORDER BY cost DESC, totalTokens DESC
-  `).all() as unknown as Array<{
+  `).all(...range.parameters) as unknown as Array<{
     model: string;
     provider: string;
     cost: number | null;
@@ -512,9 +545,10 @@ export function getDashboard(tracker: DatabaseSync): Dashboard {
       COUNT(*) AS messageCount,
       SUM(total_tokens) AS totalTokens
     FROM usage_messages
+    ${range.where}
     GROUP BY category
     ORDER BY totalTokens DESC
-  `).all() as unknown as Array<{
+  `).all(...range.parameters) as unknown as Array<{
     category: UsageCategory;
     messageCount: number;
     totalTokens: number | null;
@@ -536,7 +570,7 @@ export function getDashboard(tracker: DatabaseSync): Dashboard {
   `).get() as Dashboard["lastSync"];
 
   return {
-    generatedAt: Date.now(),
+    generatedAt: now,
     lastSync: lastSync
       ? {
           completedAt: Number(lastSync.completedAt),

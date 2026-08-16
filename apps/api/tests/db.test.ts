@@ -171,6 +171,53 @@ test("imports OMP rows idempotently and applies recorded and MiniMax prices", ()
   }
 });
 
+test("filters every dashboard aggregate to today and the current month", () => {
+  const directory = mkdtempSync(join(tmpdir(), "token-tracker-"));
+  const sourcePath = join(directory, "omp.sqlite");
+  const trackerPath = join(directory, "tracker.sqlite");
+  const source = createSourceDatabase(sourcePath);
+  const tracker = openTrackerDatabase(trackerPath);
+  const now = new Date(2026, 7, 16, 12).getTime();
+
+  try {
+    source.prepare("UPDATE messages SET timestamp = ? WHERE entry_id = ?")
+      .run(new Date(2026, 7, 16, 9).getTime(), "entry-1");
+    source.prepare("UPDATE messages SET timestamp = ? WHERE entry_id = ?")
+      .run(new Date(2026, 7, 15, 9).getTime(), "entry-2");
+    source.prepare("UPDATE messages SET timestamp = ? WHERE entry_id = ?")
+      .run(new Date(2026, 6, 31, 23).getTime(), "entry-3");
+    importFromOmp(tracker, sourcePath);
+
+    const today = getDashboard(tracker, "today", now);
+    assert.equal(today.summary.messageCount, 1);
+    assert.equal(today.summary.sessionCount, 1);
+    assert.equal(today.summary.totalTokens, 8_100);
+    assertClose(today.summary.cost, 0.03);
+    assert.equal(today.models.length, 1);
+    assert.equal(today.models[0]?.model, "claude-opus-5");
+    assert.equal(today.categories.length, 1);
+    assert.equal(today.categories[0]?.totalTokens, 8_100);
+
+    const month = getDashboard(tracker, "month", now);
+    assert.equal(month.summary.messageCount, 2);
+    assert.equal(month.summary.sessionCount, 1);
+    assert.equal(month.summary.totalTokens, 13_300);
+    assertClose(month.summary.cost, 0.056);
+    assert.equal(month.models.length, 1);
+    assert.equal(month.models[0]?.model, "claude-opus-5");
+    assert.equal(month.categories.length, 1);
+    assert.equal(month.categories[0]?.totalTokens, 13_300);
+
+    const all = getDashboard(tracker, "all", now);
+    assert.equal(all.summary.messageCount, 3);
+    assertClose(all.summary.cost, 0.0575);
+  } finally {
+    source.close();
+    tracker.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("keeps only the newest limits snapshot and serves it to the dashboard", () => {
   const directory = mkdtempSync(join(tmpdir(), "token-tracker-limits-"));
   const tracker = openTrackerDatabase(join(directory, "tracker.sqlite"));
