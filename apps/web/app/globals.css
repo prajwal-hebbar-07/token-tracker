@@ -183,11 +183,24 @@ h2 {
   background: rgba(120, 78, 12, 0.28);
 }
 
+.controlBar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 -36px;
+  padding: 14px 36px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(11, 12, 15, 0.88);
+  backdrop-filter: blur(14px);
+}
+
 .periodTabs {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  width: min(420px, 100%);
-  margin: 24px auto 0;
+  display: flex;
+  gap: 4px;
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: 11px;
@@ -896,10 +909,9 @@ h2 {
     grid-template-columns: 1fr;
   }
 
-  .topbar {
-    flex-wrap: wrap;
-    gap: 12px;
-    padding: 16px 0;
+  .controlBar {
+    margin: 0 -22px;
+    padding: 14px 22px;
   }
 }
 
@@ -955,5 +967,22 @@ h2 {
 
   .projectGrid {
     grid-template-columns: 1fr;
+  }
+
+  .controlBar {
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 0 -14px;
+    padding: 12px 14px;
+  }
+
+  .appNav,
+  .periodTabs {
+    flex: 1 1 100%;
+  }
+
+  .appNav a,
+  .periodTabs button {
+    flex: 1;
   }
 }

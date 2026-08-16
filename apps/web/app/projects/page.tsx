@@ -3,10 +3,11 @@
 import { type CSSProperties, useCallback, useEffect, useState } from "react";
 import { compactNumber, fullNumber, hiddenModels, money, priceLabel, requestJson } from "../lib";
 import { AppNav } from "../nav";
+import { type Period, PeriodTabs, usePeriod } from "../period";
 
 interface ProjectsReport {
   generatedAt: number;
-  period: ProjectsPeriod;
+  period: Period;
   totals: {
     cost: number;
     totalTokens: number;
@@ -44,13 +45,11 @@ interface ProjectsReport {
   }>;
 }
 
-type ProjectsPeriod = "today" | "month" | "all";
-
-const periods: Array<{ value: ProjectsPeriod; label: string; eyebrow: string }> = [
-  { value: "today", label: "Today", eyebrow: "TODAY'S SPEND BY PROJECT" },
-  { value: "month", label: "This month", eyebrow: "CURRENT MONTH SPEND BY PROJECT" },
-  { value: "all", label: "All time", eyebrow: "ALL-TIME SPEND BY PROJECT" },
-];
+const eyebrows: Record<Period, string> = {
+  today: "TODAY'S SPEND BY PROJECT",
+  month: "CURRENT MONTH SPEND BY PROJECT",
+  all: "ALL-TIME SPEND BY PROJECT",
+};
 
 function isProjectsReport(value: unknown): value is ProjectsReport {
   if (!value || typeof value !== "object") return false;
@@ -77,7 +76,7 @@ function lastActive(timestamp: number | null): string {
 
 export default function ProjectsPage() {
   const [report, setReport] = useState<ProjectsReport | null>(null);
-  const [period, setPeriod] = useState<ProjectsPeriod>("month");
+  const { period } = usePeriod();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -129,7 +128,6 @@ export default function ProjectsPage() {
             <h1>Token Tracker</h1>
           </div>
         </div>
-        <AppNav />
         <div className="headerActions">
           <div className="syncMeta">
             <span className="statusDot" />
@@ -138,21 +136,12 @@ export default function ProjectsPage() {
         </div>
       </header>
 
-      {error && <div className="alert errorAlert">{error}</div>}
-
-      <div className="periodTabs" aria-label="Usage period">
-        {periods.map((option) => (
-          <button
-            type="button"
-            aria-pressed={period === option.value}
-            className={period === option.value ? "active" : undefined}
-            key={option.value}
-            onClick={() => setPeriod(option.value)}
-          >
-            {option.label}
-          </button>
-        ))}
+      <div className="controlBar">
+        <AppNav />
+        <PeriodTabs />
       </div>
+
+      {error && <div className="alert errorAlert">{error}</div>}
 
       {loading ? (
         <section className="emptyState"><div className="spinner" /><p>Loading project usage…</p></section>
@@ -172,7 +161,7 @@ export default function ProjectsPage() {
         <>
           <section className="hero">
             <div>
-              <p className="eyebrow">{periods.find((option) => option.value === period)?.eyebrow}</p>
+              <p className="eyebrow">{eyebrows[period]}</p>
               <div className="totalSpend">{money.format(report.totals.cost)}</div>
               <p className="range">
                 {fullNumber.format(report.totals.projectCount)} projects ·{" "}

@@ -3,6 +3,7 @@
 import { type CSSProperties, useCallback, useEffect, useState } from "react";
 import { compactNumber, fullNumber, hiddenModels, money, preciseMoney, priceLabel, requestJson } from "./lib";
 import { AppNav } from "./nav";
+import { type Period, PeriodTabs, usePeriod } from "./period";
 
 interface Dashboard {
   generatedAt: number;
@@ -59,13 +60,11 @@ interface Dashboard {
   } | null;
 }
 
-type DashboardPeriod = "today" | "month" | "all";
-
-const periods: Array<{ value: DashboardPeriod; label: string; eyebrow: string }> = [
-  { value: "today", label: "Today", eyebrow: "TODAY'S SPEND" },
-  { value: "month", label: "This month", eyebrow: "CURRENT MONTH SPEND" },
-  { value: "all", label: "All time", eyebrow: "ALL-TIME SPEND" },
-];
+const eyebrows: Record<Period, string> = {
+  today: "TODAY'S SPEND",
+  month: "CURRENT MONTH SPEND",
+  all: "ALL-TIME SPEND",
+};
 
 function isDashboard(value: unknown): value is Dashboard {
   if (!value || typeof value !== "object") return false;
@@ -103,7 +102,7 @@ function limitTone(quota: { status: string; usedFraction: number | null }): stri
 
 export default function DashboardPage() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
-  const [period, setPeriod] = useState<DashboardPeriod>("month");
+  const { period } = usePeriod();
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -175,7 +174,6 @@ export default function DashboardPage() {
             <h1>Token Tracker</h1>
           </div>
         </div>
-        <AppNav />
         <div className="headerActions">
           <div className="syncMeta">
             <span className="statusDot" />
@@ -189,26 +187,16 @@ export default function DashboardPage() {
         </div>
       </header>
 
+      <div className="controlBar">
+        <AppNav />
+        <PeriodTabs disabled={importing} />
+      </div>
+
       {error && <div className="alert errorAlert">{error}</div>}
       {notice && <div className="alert successAlert">{notice}</div>}
       {warnings.map((entry) => (
         <div className="alert warningAlert" key={entry}>{entry}</div>
       ))}
-
-      <div className="periodTabs" aria-label="Usage period">
-        {periods.map((option) => (
-          <button
-            type="button"
-            aria-pressed={period === option.value}
-            className={period === option.value ? "active" : undefined}
-            disabled={importing}
-            key={option.value}
-            onClick={() => setPeriod(option.value)}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
 
       {loading ? (
         <section className="emptyState"><div className="spinner" /><p>Loading saved usage…</p></section>
@@ -231,7 +219,7 @@ export default function DashboardPage() {
         <>
           <section className="hero">
             <div>
-              <p className="eyebrow">{periods.find((option) => option.value === period)?.eyebrow}</p>
+              <p className="eyebrow">{eyebrows[period]}</p>
               <div className="totalSpend">{money.format(dashboard.summary.cost)}</div>
               <p className="range">
                 {period === "today"
