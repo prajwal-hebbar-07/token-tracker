@@ -2,18 +2,39 @@
 
 Local dashboard for importing Oh My Pi usage, storing it in SQLite, and showing
 what each model actually costs alongside the remaining quota on every
-authenticated provider account.
+authenticated provider account. Shipped as a single-file installer that starts
+its own local API and serves the dashboard from inside the binary.
 
-## Run locally
+## Install the desktop app
 
-Requires Node.js 22.5+ and pnpm.
+Building the app requires a Rust toolchain (`rustup`), Node.js 22.5+ and pnpm.
+The packaged app itself needs neither Node nor a running server.
 
 ```bash
 pnpm install
-pnpm dev
+pnpm bundle
 ```
 
-Open `http://localhost:3000`, then click **Fetch Oh My Pi data**. That button does
+The finished installer is written to `apps/desktop/src-tauri/target/release/bundle/`.
+On macOS this is a `.dmg` containing `Token Tracker.app`. Opening the installed
+app is all that is required — it starts its own local API on an unused port,
+serves the dashboard from inside the binary, and needs no terminal.
+
+`pnpm dev` runs the same app from a debug build for development.
+
+## How it works
+
+The desktop app is a single binary. On launch it binds a loopback HTTP server
+to `127.0.0.1` on an ephemeral port, serves the dashboard bundle that is
+embedded in the binary, answers `/api/*` from the same origin so the interface
+needs no separate backend, and then opens a native window on that address.
+
+The dashboard is deliberately not a background service: nothing is imported or
+refreshed until the **Fetch Oh My Pi data** button is pressed.
+
+## Using the dashboard
+
+Open the installed app, then click **Fetch Oh My Pi data**. That button does
 three things and nothing happens without it — there is no polling or background
 sync:
 
@@ -28,15 +49,6 @@ If either `omp` call fails the import still completes — with the existing stat
 snapshot, and with the previously stored limits — and the dashboard shows a
 warning instead of pretending the data is current.
 
-The API reads `~/.omp/stats.db` by default and writes its own database to
-`apps/api/data/token-tracker.sqlite`.
-
-Account limits come from each provider rather than estimates based on local
-token counts. Oh My Pi supplies the supported providers; Ollama Cloud's session
-and weekly percentages come from its account usage endpoint. Token Tracker uses
-`OLLAMA_API_KEY` when set, otherwise the enabled `ollama-cloud` credential in Oh
-My Pi's agent database. Ollama does not currently return reset timestamps.
-
 MiniMax-M3 rows are estimated using [MiniMax standard pay-as-you-go
 pricing](https://platform.minimax.io/docs/guides/pricing-paygo): $0.30 input,
 $1.20 output, and $0.06 cache-read per million tokens up to 512k input tokens.
@@ -47,42 +59,68 @@ model's share of total spend, the number inside it is the blended price actually
 paid per million tokens, and the bar underneath compares that price against the
 priciest model in use.
 
-The **Projects** tab is a page of its own at `http://localhost:3000/projects`. A
+The **Projects** tab is a page of its own reached from the top navigation. A
 project is the working directory Oh My Pi recorded for each session, so the page
 needs no extra bookkeeping. Every project is one card carrying its total spend,
 its share of the period's spend as a ring, the tokens and sessions behind that
 number, and the split across the models that did the work. The whole breakdown
 arrives in a single request, so no card has to be opened to read it.
 
-The API serves `GET /api/dashboard?period=today|month|all` for the dashboard and
-`GET /api/projects?period=today|month|all` for the projects page, and
-`POST /api/import` for the fetch button. All three default to the whole history
-when no period is given.
-
 The **Account limits** panel has a *Visible limits* control in its header for
 choosing which quotas to display. Each quota is addressed by provider, account
 and window, because the same provider can appear twice under two different
 accounts and still report identically named windows. Hiding every window of a
-provider removes its card from the panel. The choice lives in the browser under
-the `localStorage` key `token-tracker.hidden-limits`, so it is per-browser, it
-survives reloads, and it never reaches the API or the database.
+provider removes its card from the panel. The choice lives in the app's own web
+storage under the `localStorage` key `token-tracker.hidden-limits`, so it is per
+install, it survives restarts, and it never reaches the API or the database.
+
+## Where the data lives
+
+The desktop app reads Oh My Pi's own database at `~/.omp/stats.db` and writes
+its own SQLite database into the per-user application-data directory, which on
+macOS is `~/Library/Application Support/com.tokentracker.desktop/token-tracker.sqlite`.
+Setting `DATA_DIR` overrides that directory.
+
+Account limits come from each provider rather than from estimates based on
+local token counts. Oh My Pi supplies the supported providers; Ollama Cloud's
+session and weekly percentages come from its account usage endpoint. Token
+Tracker uses `OLLAMA_API_KEY` when set, otherwise the enabled `ollama-cloud`
+credential in Oh My Pi's agent database. Ollama does not currently return reset
+timestamps.
 
 ## Configuration
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `OMP_STATS_DB` | `~/.omp/stats.db` | Oh My Pi source database |
-| `DATA_DIR` | `apps/api/data` | Token Tracker SQLite directory |
+| `DATA_DIR` | app data directory | Token Tracker SQLite directory |
 | `OMP_BIN` | `omp` | Oh My Pi binary used for the session sync and usage limits |
 | `OMP_AGENT_DB` | `~/.omp/agent/agent.db` | Oh My Pi credential database used for Ollama Cloud |
 | `OLLAMA_API_KEY` | Oh My Pi credential | Optional Ollama Cloud API-key override |
-| `PORT` | `4000` | API port |
-| `HOST` | `127.0.0.1` | API bind address |
-| `API_URL` | `http://127.0.0.1:4000` | Backend origin used by Next.js |
+| `TOKEN_TRACKER_PORT` | ephemeral | Desktop app loopback port; `0` picks any free port |
 
 ## Commands
 
 ```bash
+pnpm dev
+pnpm bundle
 pnpm test
 pnpm build
+```
+
+`pnpm dev` runs the desktop app from a debug build, `pnpm bundle` produces the
+installer, `pnpm test` runs the reference API test suite, and `pnpm build`
+compiles the dashboard bundle that gets embedded into the binary.
+
+There is no development web server. The dashboard is a static bundle compiled
+into the app, so `apps/web` is built rather than served, and nothing listens on
+a fixed port.
+
+The desktop backend is a Rust port of the API in `apps/api`, which is still the
+reference implementation. `cargo test` inside `apps/desktop/src-tauri` imports
+one fixture with both and compares the resulting dashboard and projects reports
+field by field, so the two cannot disagree about a number without failing:
+
+```bash
+cd apps/desktop/src-tauri && cargo test
 ```

@@ -2,9 +2,7 @@
   "name": "@token-tracker/web",
   "private": true,
   "scripts": {
-    "build": "next build",
-    "dev": "next dev",
-    "start": "next start"
+    "build": "next build"
   },
   "dependencies": {
     "next": "16.3.1",

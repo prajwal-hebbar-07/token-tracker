@@ -1,0 +1,16 @@
+{
+  "name": "@token-tracker/desktop",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "bundle": "tauri build",
+    "dev": "tauri dev",
+    "icon": "tauri icon"
+  },
+  "dependencies": {
+    "@token-tracker/web": "workspace:*"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4"
+  }
+}

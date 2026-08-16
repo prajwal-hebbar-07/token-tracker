@@ -4,7 +4,8 @@
   "packageManager": "pnpm@11.20.0",
   "scripts": {
     "build": "turbo build",
-    "dev": "turbo dev",
+    "dev": "pnpm --filter @token-tracker/desktop run dev",
+    "bundle": "pnpm --filter @token-tracker/desktop run bundle",
     "test": "turbo test"
   },
   "devDependencies": {

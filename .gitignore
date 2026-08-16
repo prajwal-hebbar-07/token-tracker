@@ -3,6 +3,9 @@ node_modules/
 .turbo/
 .next/
 dist/
+out/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
 *.tsbuildinfo
 apps/api/data/
 .env

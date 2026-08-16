@@ -1,16 +1,9 @@
 import type { NextConfig } from "next";
 
-const apiOrigin = process.env.API_URL ?? "http://127.0.0.1:4000";
-
+// The desktop app serves this bundle and /api from one loopback origin, so a
+// plain static export is all that is needed: no proxy, and no dev server.
 const nextConfig: NextConfig = {
-  async rewrites() {
-    return [
-      {
-        source: "/api/:path*",
-        destination: `${apiOrigin}/api/:path*`,
-      },
-    ];
-  },
+  output: "export",
 };
 
 export default nextConfig;
