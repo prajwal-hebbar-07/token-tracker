@@ -397,3 +397,81 @@ test("rolls usage up per project with a per-model breakdown", () => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("keeps scratch directories out of the project rollup", () => {
+  const directory = mkdtempSync(join(tmpdir(), "token-tracker-"));
+  const sourcePath = join(directory, "omp.sqlite");
+  const trackerPath = join(directory, "tracker.sqlite");
+  const source = createSourceDatabase(sourcePath);
+  const tracker = openTrackerDatabase(trackerPath);
+
+  try {
+    importFromOmp(tracker, sourcePath);
+
+    const insertScratch = tracker.prepare(`
+      INSERT INTO usage_messages (
+        session_file, entry_id, folder, model, provider, api, timestamp, stop_reason,
+        input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total_tokens,
+        premium_requests, cost_input, cost_output, cost_cache_read, cost_cache_write,
+        cost_total, agent_type, category, project_path, imported_at
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, ?, 'stop',
+        10, 10, 0, 0, 20,
+        0, 0.5, 0.5, 0, 0,
+        1, 'main', 'Development', ?, 1
+      )
+    `);
+    // A smoke run in the system temp directory and a session started straight
+    // from the home directory. Neither is a workspace.
+    insertScratch.run(
+      "scratch-1.jsonl",
+      "scratch-entry-1",
+      "-tmp-omp-smoke-abc123",
+      "claude-opus-5",
+      "anthropic",
+      "messages",
+      1_700_000_002_000,
+      join(tmpdir(), "omp-smoke-abc123"),
+    );
+    insertScratch.run(
+      "scratch-2.jsonl",
+      "scratch-entry-2",
+      "-",
+      "claude-opus-5",
+      "anthropic",
+      "messages",
+      1_700_000_003_000,
+      homedir(),
+    );
+    // Spelled out rather than built from tmpdir(), so the macOS per-user temp
+    // root stays recognised even when the server runs without TMPDIR set.
+    insertScratch.run(
+      "scratch-3.jsonl",
+      "scratch-entry-3",
+      "-tmp-omp-probe-literal",
+      "claude-opus-5",
+      "anthropic",
+      "messages",
+      1_700_000_004_000,
+      "/var/folders/sc/7h45fyds1nd7fhgytgpyn8k00000gn/T/omp-probe-literal",
+    );
+
+    const report = getProjects(tracker, "all");
+    assert.deepEqual(report.projects.map((entry) => entry.folder), ["workspace-alpha", "workspace-beta"]);
+    assert.equal(report.totals.projectCount, 2);
+
+    // The scratch rows carried a dollar each; the totals must not have absorbed them.
+    assertClose(report.totals.cost, 0.0575);
+    assert.equal(report.totals.totalTokens, 13_850);
+    assert.equal(report.totals.messageCount, 3);
+
+    // The legend is folded up from the surviving projects only.
+    assert.deepEqual(report.models.map((entry) => entry.model), ["claude-opus-5", "gpt-test"]);
+    assertClose(report.models[0].cost, 0.056);
+    assert.equal(report.models[0].totalTokens, 13_300);
+  } finally {
+    source.close();
+    tracker.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

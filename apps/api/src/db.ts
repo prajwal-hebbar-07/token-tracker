@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { LimitsSnapshot } from "./omp-cli.js";
@@ -685,6 +685,25 @@ function projectName(folder: string, path: string | null): string {
   return trimmed === "" ? "(no workspace)" : trimmed;
 }
 
+// The macOS per-user temp root, matched by shape. os.tmpdir() only reports the
+// value of TMPDIR in this process, so a server started without it would
+// otherwise stop recognising /var/folders/<x>/<y>/T as scratch space.
+const MACOS_TEMP_ROOT = /^\/(?:private\/)?var\/folders\/[^/]+\/[^/]+\/T(?:\/|$)/;
+
+// Smoke tests and probes run in the system temp directory, and a session
+// started from the home directory never entered a workspace at all. Neither is
+// a project, so they stay out of the rollup instead of padding it with noise.
+function isProject(folder: string, path: string | null): boolean {
+  if (path === null) {
+    const trimmed = folder.replace(/^[-/]+/, "").replace(/\/+$/, "");
+    return trimmed !== "" && trimmed !== "tmp" && !trimmed.startsWith("tmp-");
+  }
+  if (path === homedir() || MACOS_TEMP_ROOT.test(path)) return false;
+  return ![tmpdir(), "/tmp", "/private/tmp", "/var/tmp"].some(
+    (root) => path === root || path.startsWith(`${root}/`),
+  );
+}
+
 export function getProjects(
   tracker: DatabaseSync,
   period: DashboardPeriod = "all",
@@ -761,29 +780,7 @@ export function getProjects(
     else perProjectModels.set(row.folder, [entry]);
   }
 
-  const models = (tracker.prepare(`
-    SELECT
-      model,
-      provider,
-      SUM(cost_total) AS cost,
-      SUM(total_tokens) AS totalTokens
-    FROM usage_messages
-    ${range.where}
-    GROUP BY model, provider
-    ORDER BY cost DESC, totalTokens DESC
-  `).all(...range.parameters) as unknown as Array<{
-    model: string;
-    provider: string;
-    cost: number | null;
-    totalTokens: number | null;
-  }>).map((row) => ({
-    model: row.model,
-    provider: row.provider,
-    cost: numberOrZero(row.cost),
-    totalTokens: numberOrZero(row.totalTokens),
-  }));
-
-  const projects = rows.map((row) => {
+  const projects = rows.filter((row) => isProject(row.folder, row.path)).map((row) => {
     const cost = numberOrZero(row.cost);
     const totalTokens = numberOrZero(row.totalTokens);
     return {
@@ -804,6 +801,30 @@ export function getProjects(
       models: perProjectModels.get(row.folder) ?? [],
     };
   });
+
+  // The legend is folded up from the projects that survived the filter, so a
+  // model can never appear in it without a card behind it.
+  const modelTotals = new Map<string, ProjectsReport["models"][number]>();
+  for (const project of projects) {
+    for (const entry of project.models) {
+      const key = `${entry.provider}/${entry.model}`;
+      const running = modelTotals.get(key);
+      if (running) {
+        running.cost += entry.cost;
+        running.totalTokens += entry.totalTokens;
+      } else {
+        modelTotals.set(key, {
+          model: entry.model,
+          provider: entry.provider,
+          cost: entry.cost,
+          totalTokens: entry.totalTokens,
+        });
+      }
+    }
+  }
+  const models = [...modelTotals.values()].sort(
+    (left, right) => right.cost - left.cost || right.totalTokens - left.totalTokens,
+  );
 
   return {
     generatedAt: now,
