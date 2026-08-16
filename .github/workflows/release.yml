@@ -1,0 +1,200 @@
+name: Release
+
+# Releases are cut from the Actions tab. There is deliberately no tag trigger:
+# the workflow owns the version number, so tagging by hand would be a second
+# source of truth for it.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Which part of the version to bump
+        type: choice
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+      dry_run:
+        description: Build without committing, tagging or publishing
+        type: boolean
+        default: false
+
+# Needed to push the version bump and to create the release.
+permissions:
+  contents: write
+
+# Two releases at once would race on the version number and on the push.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    name: Build and publish the macOS installer
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Reads the pnpm version from the repository's packageManager field.
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # The runners ship a stable Rust toolchain and the arm64 target already.
+      # Only the second architecture of the universal binary has to be added.
+      - name: Add the Intel build target
+        run: rustup target add x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Work out the next version
+        id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          current="$(jq -r .version apps/desktop/src-tauri/tauri.conf.json)"
+          if [[ ! "$current" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version ${current} in apps/desktop/src-tauri/tauri.conf.json is not major.minor.patch, so it cannot be bumped automatically."
+            exit 1
+          fi
+          IFS=. read -r major minor patch <<< "$current"
+          case "$BUMP" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+            *) echo "::error::Unknown bump ${BUMP}."; exit 1 ;;
+          esac
+          next="${major}.${minor}.${patch}"
+          echo "current=${current}" >> "$GITHUB_OUTPUT"
+          echo "next=${next}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${next}" >> "$GITHUB_OUTPUT"
+          echo "Releasing ${current} as ${next}." >> "$GITHUB_STEP_SUMMARY"
+
+      # The version has to land before the build, because it names the artifact
+      # the user downloads. Nothing is committed until the build has succeeded.
+      - name: Apply the version
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
+        run: |
+          conf=apps/desktop/src-tauri/tauri.conf.json
+          pkg=apps/desktop/package.json
+          manifest=apps/desktop/src-tauri/Cargo.toml
+
+          # Rewriting only the version literal keeps these edits to one line per
+          # file. Piping JSON through jq would reformat unrelated keys and drag a
+          # gratuitous reflow into every release commit.
+          set_json_version() {
+            awk -v v="$NEXT" '!seen && /^  "version": "/ { sub(/"[0-9][^"]*"/, "\"" v "\""); seen = 1 } { print }' \
+              "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+          }
+          set_json_version "$conf"
+          set_json_version "$pkg"
+          awk -v v="$NEXT" '!seen && /^version = / { print "version = \"" v "\""; seen = 1; next } { print }' \
+            "$manifest" > "$manifest.tmp" && mv "$manifest.tmp" "$manifest"
+
+          # A silently failed edit would publish a mislabelled installer, so each
+          # file is read back rather than trusted.
+          for file in "$conf" "$pkg"; do
+            found="$(jq -r .version "$file")"
+            if [ "$found" != "$NEXT" ]; then
+              echo "::error::${file} still reads ${found} instead of ${NEXT}."
+              exit 1
+            fi
+          done
+          if ! grep -qx "version = \"${NEXT}\"" "$manifest"; then
+            echo "::error::${manifest} was not rewritten to ${NEXT}."
+            exit 1
+          fi
+
+      - name: Test the reference implementation
+        run: pnpm test
+
+      # The differential test lives here: it imports one fixture with both the
+      # Rust port and the TypeScript original and compares the reports, so a
+      # release cannot ship drifted cost arithmetic. It also refreshes Cargo.lock
+      # with the new package version.
+      - name: Test the desktop backend
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+
+      # This must go through the Tauri CLI. Its beforeBuildCommand produces
+      # apps/web/out, which the Rust build embeds with include_dir! at compile
+      # time; a bare cargo build would embed an empty dashboard.
+      - name: Build the universal bundle
+        run: pnpm --filter @token-tracker/desktop exec tauri build --target universal-apple-darwin
+
+      # Tauri names the bundle with a space, which survives badly in a download
+      # URL, so it is renamed to something predictable and space free.
+      - name: Collect the installer
+        id: installer
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
+        run: |
+          shopt -s nullglob
+          bundles=(apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg)
+          if [ ${#bundles[@]} -ne 1 ]; then
+            echo "::error::Expected exactly one .dmg, found ${#bundles[@]}."
+            exit 1
+          fi
+          name="Token-Tracker-${NEXT}-universal.dmg"
+          mkdir -p dist
+          mv "${bundles[0]}" "dist/${name}"
+          echo "path=dist/${name}" >> "$GITHUB_OUTPUT"
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: token-tracker-macos-${{ steps.version.outputs.next }}
+          path: ${{ steps.installer.outputs.path }}
+          if-no-files-found: error
+
+      # Everything below only runs once the tests and the build have passed, so a
+      # failure leaves the repository exactly as it was: no bump, no tag, no
+      # release claiming a version that was never built.
+      - name: Commit and tag the version
+        if: ${{ !inputs.dry_run }}
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
+          TAG: ${{ steps.version.outputs.tag }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            apps/desktop/src-tauri/tauri.conf.json \
+            apps/desktop/src-tauri/Cargo.toml \
+            apps/desktop/src-tauri/Cargo.lock \
+            apps/desktop/package.json
+          git commit -m "chore(release): ${TAG}"
+          git tag "$TAG"
+          git push origin "HEAD:${BRANCH}"
+          git push origin "$TAG"
+
+      - name: Publish the release
+        if: ${{ !inputs.dry_run }}
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          files: ${{ steps.installer.outputs.path }}
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          body: |
+            Download `${{ steps.installer.outputs.name }}` below, open it, and drag **Token Tracker** to Applications.
+
+            It is a universal build, so it runs on both Apple Silicon and Intel Macs, and it needs no terminal and no separate server.
+
+            This app is not signed with an Apple Developer certificate, so macOS quarantines it after download and reports it as damaged. Clear the flag once, after copying the app to Applications:
+
+            ```bash
+            xattr -dr com.apple.quarantine "/Applications/Token Tracker.app"
+            ```

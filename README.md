@@ -7,20 +7,34 @@ its own local API and serves the dashboard from inside the binary.
 
 ## Install the desktop app
 
-Building the app requires a Rust toolchain (`rustup`), Node.js 22.5+ and pnpm.
-The packaged app itself needs neither Node nor a running server.
+Download the latest `.dmg` from the [Releases](../../releases) page, open it, and
+drag **Token Tracker** to Applications. It is a universal build, so it runs on
+both Apple Silicon and Intel Macs, and it needs neither Node nor a running
+server.
+
+The app is not signed with an Apple Developer certificate, so macOS quarantines
+it after download and reports it as damaged. Clear the flag once, after copying
+the app to Applications:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Token Tracker.app"
+```
+
+Opening it after that needs no terminal.
+
+### Build it yourself instead
+
+Building locally requires a Rust toolchain (`rustup`), Node.js 22.5+ and pnpm.
 
 ```bash
 pnpm install
 pnpm bundle
 ```
 
-The finished installer is written to `apps/desktop/src-tauri/target/release/bundle/`.
-On macOS this is a `.dmg` containing `Token Tracker.app`. Opening the installed
-app is all that is required — it starts its own local API on an unused port,
-serves the dashboard from inside the binary, and needs no terminal.
-
-`pnpm dev` runs the same app from a debug build for development.
+The finished installer is written to
+`apps/desktop/src-tauri/target/release/bundle/`. On macOS this is a `.dmg`
+containing `Token Tracker.app`. `pnpm dev` runs the same app from a debug build
+for development.
 
 ## How it works
 
@@ -124,3 +138,30 @@ field by field, so the two cannot disagree about a number without failing:
 ```bash
 cd apps/desktop/src-tauri && cargo test
 ```
+
+## Releasing
+
+Releases are cut from the Actions tab, not from a local tag. Open **Actions**,
+select the **Release** workflow, press **Run workflow**, choose whether to bump
+the `patch`, `minor` or `major` version, and run it. The workflow owns the
+version number, so nothing needs editing by hand beforehand.
+
+It writes the new version into `apps/desktop/src-tauri/tauri.conf.json`,
+`apps/desktop/src-tauri/Cargo.toml`, `apps/desktop/package.json` and
+`apps/desktop/src-tauri/Cargo.lock` together, runs both test suites, builds the
+universal macOS bundle, and only then commits the bump, tags it `v<version>`,
+pushes the commit and the tag, and publishes the release with
+`Token-Tracker-<version>-universal.dmg` attached.
+
+The order matters: a failed test or a failed build pushes nothing at all, so the
+repository is never left claiming a version that was never released. Pull
+afterwards to pick up the bump, which is what keeps the local checkout and
+GitHub on the same version:
+
+```bash
+git pull
+```
+
+Tick **dry run** to bump, test and build without committing, tagging or
+publishing anything. The installer is uploaded as a workflow artifact instead,
+which is the way to exercise the workflow without cutting a release.
