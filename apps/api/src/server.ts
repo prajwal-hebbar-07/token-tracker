@@ -1,6 +1,7 @@
 import { createServer, type ServerResponse } from "node:http";
 import {
   getDashboard,
+  getProjects,
   type ImportResult,
   importFromOmp,
   openTrackerDatabase,
@@ -44,6 +45,16 @@ const server = createServer(async (request, response) => {
         return;
       }
       sendJson(response, 200, getDashboard(tracker, period));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/projects") {
+      const period = url.searchParams.get("period") ?? "all";
+      if (period !== "today" && period !== "month" && period !== "all") {
+        sendJson(response, 400, { error: "period must be today, month, or all" });
+        return;
+      }
+      sendJson(response, 200, getProjects(tracker, period));
       return;
     }
 

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { getDashboard, importFromOmp, openTrackerDatabase, saveLimitsSnapshot } from "../src/db.js";
+import { getDashboard, getProjects, importFromOmp, openTrackerDatabase, saveLimitsSnapshot } from "../src/db.js";
 
 function writeSession(filePath: string, userText: string, entryIds: string[]): void {
   const lines: string[] = [];
@@ -330,6 +330,65 @@ test("preserves the work-category column from earlier builds", () => {
     // Reopening a migrated database is a no-op rather than an error.
     openTrackerDatabase(trackerPath).close();
   } finally {
+    tracker.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("rolls usage up per project with a per-model breakdown", () => {
+  const directory = mkdtempSync(join(tmpdir(), "token-tracker-"));
+  const sourcePath = join(directory, "omp.sqlite");
+  const trackerPath = join(directory, "tracker.sqlite");
+  const source = createSourceDatabase(sourcePath);
+  const tracker = openTrackerDatabase(trackerPath);
+
+  try {
+    importFromOmp(tracker, sourcePath);
+
+    const report = getProjects(tracker, "all");
+    assert.equal(report.period, "all");
+    assert.equal(report.totals.projectCount, 2);
+    assert.equal(report.totals.messageCount, 3);
+    assert.equal(report.totals.sessionCount, 2);
+    assert.equal(report.totals.totalTokens, 13_850);
+    assertClose(report.totals.cost, 0.0575);
+
+    // Costliest project first.
+    assert.deepEqual(report.projects.map((entry) => entry.folder), ["workspace-alpha", "workspace-beta"]);
+
+    const alpha = report.projects[0];
+    assert.equal(alpha.name, "workspace-alpha");
+    assertClose(alpha.cost, 0.056);
+    assert.equal(alpha.totalTokens, 13_300);
+    assert.equal(alpha.inputTokens, 3_000);
+    assert.equal(alpha.outputTokens, 300);
+    assert.equal(alpha.cacheReadTokens, 7_000);
+    assert.equal(alpha.cacheWriteTokens, 3_000);
+    assert.equal(alpha.messageCount, 2);
+    assert.equal(alpha.sessionCount, 1);
+    assert.equal(alpha.firstMessageAt, 1_700_000_000_000);
+    assert.equal(alpha.lastMessageAt, 1_700_000_001_000);
+    assertClose(alpha.effectivePricePerMillion, (0.056 / 13_300) * 1_000_000);
+    assert.equal(alpha.models.length, 1);
+    assert.equal(alpha.models[0].model, "claude-opus-5");
+    assert.equal(alpha.models[0].provider, "anthropic");
+    assert.equal(alpha.models[0].totalTokens, 13_300);
+    assert.equal(alpha.models[0].messageCount, 2);
+    assertClose(alpha.models[0].cost, 0.056);
+
+    const beta = report.projects[1];
+    assert.equal(beta.name, "workspace-beta");
+    assertClose(beta.cost, 0.0015);
+    assert.equal(beta.totalTokens, 550);
+    assert.equal(beta.messageCount, 1);
+    assert.equal(beta.sessionCount, 1);
+    assert.equal(beta.models.length, 1);
+    assert.equal(beta.models[0].model, "gpt-test");
+    assert.equal(beta.models[0].provider, "openai");
+
+    assert.deepEqual(report.models.map((entry) => entry.model), ["claude-opus-5", "gpt-test"]);
+  } finally {
+    source.close();
     tracker.close();
     rmSync(directory, { recursive: true, force: true });
   }

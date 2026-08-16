@@ -76,6 +76,46 @@ export interface Dashboard {
   limits: LimitsSnapshot | null;
 }
 
+export interface ProjectsReport {
+  generatedAt: number;
+  period: DashboardPeriod;
+  totals: {
+    cost: number;
+    totalTokens: number;
+    messageCount: number;
+    sessionCount: number;
+    projectCount: number;
+  };
+  models: Array<{
+    model: string;
+    provider: string;
+    cost: number;
+    totalTokens: number;
+  }>;
+  projects: Array<{
+    folder: string;
+    name: string;
+    cost: number;
+    totalTokens: number;
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+    messageCount: number;
+    sessionCount: number;
+    firstMessageAt: number | null;
+    lastMessageAt: number | null;
+    effectivePricePerMillion: number | null;
+    models: Array<{
+      model: string;
+      provider: string;
+      cost: number;
+      totalTokens: number;
+      messageCount: number;
+    }>;
+  }>;
+}
+
 // Standard pay-as-you-go rates published by MiniMax on 2026-08-15.
 // https://platform.minimax.io/docs/guides/pricing-paygo
 const MINIMAX_M3_CONTEXT_LIMIT = 512_000;
@@ -594,5 +634,146 @@ export function getDashboard(
     models,
     categories,
     limits: readLimitsSnapshot(tracker),
+  };
+}
+
+// Oh My Pi records the working directory as a slug where both "/" and "-" became
+// "-", so the original path cannot be recovered. Strip the leading separator and
+// show the slug as it is rather than guessing where the directory boundaries were.
+function projectName(folder: string): string {
+  const trimmed = folder.replace(/^[-/]+/, "").replace(/\/+$/, "");
+  return trimmed === "" ? "(no workspace)" : trimmed;
+}
+
+export function getProjects(
+  tracker: DatabaseSync,
+  period: DashboardPeriod = "all",
+  now = Date.now(),
+): ProjectsReport {
+  const range = usageRange(period, now);
+  const rows = tracker.prepare(`
+    SELECT
+      folder,
+      COUNT(*) AS messageCount,
+      COUNT(DISTINCT session_file) AS sessionCount,
+      SUM(input_tokens) AS inputTokens,
+      SUM(output_tokens) AS outputTokens,
+      SUM(cache_read_tokens) AS cacheReadTokens,
+      SUM(cache_write_tokens) AS cacheWriteTokens,
+      SUM(total_tokens) AS totalTokens,
+      SUM(cost_total) AS cost,
+      MIN(timestamp) AS firstMessageAt,
+      MAX(timestamp) AS lastMessageAt
+    FROM usage_messages
+    ${range.where}
+    GROUP BY folder
+    ORDER BY cost DESC, totalTokens DESC
+  `).all(...range.parameters) as unknown as Array<{
+    folder: string;
+    messageCount: number;
+    sessionCount: number;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    cacheReadTokens: number | null;
+    cacheWriteTokens: number | null;
+    totalTokens: number | null;
+    cost: number | null;
+    firstMessageAt: number | null;
+    lastMessageAt: number | null;
+  }>;
+
+  // One extra grouped pass keeps the per-model split on the same page load, so the
+  // UI never has to fetch a second time to explain a project's spend.
+  const breakdown = tracker.prepare(`
+    SELECT
+      folder,
+      model,
+      provider,
+      COUNT(*) AS messageCount,
+      SUM(total_tokens) AS totalTokens,
+      SUM(cost_total) AS cost
+    FROM usage_messages
+    ${range.where}
+    GROUP BY folder, model, provider
+    ORDER BY cost DESC, totalTokens DESC
+  `).all(...range.parameters) as unknown as Array<{
+    folder: string;
+    model: string;
+    provider: string;
+    messageCount: number;
+    totalTokens: number | null;
+    cost: number | null;
+  }>;
+
+  const perProjectModels = new Map<string, ProjectsReport["projects"][number]["models"]>();
+  for (const row of breakdown) {
+    const entries = perProjectModels.get(row.folder);
+    const entry = {
+      model: row.model,
+      provider: row.provider,
+      cost: numberOrZero(row.cost),
+      totalTokens: numberOrZero(row.totalTokens),
+      messageCount: Number(row.messageCount),
+    };
+    if (entries) entries.push(entry);
+    else perProjectModels.set(row.folder, [entry]);
+  }
+
+  const models = (tracker.prepare(`
+    SELECT
+      model,
+      provider,
+      SUM(cost_total) AS cost,
+      SUM(total_tokens) AS totalTokens
+    FROM usage_messages
+    ${range.where}
+    GROUP BY model, provider
+    ORDER BY cost DESC, totalTokens DESC
+  `).all(...range.parameters) as unknown as Array<{
+    model: string;
+    provider: string;
+    cost: number | null;
+    totalTokens: number | null;
+  }>).map((row) => ({
+    model: row.model,
+    provider: row.provider,
+    cost: numberOrZero(row.cost),
+    totalTokens: numberOrZero(row.totalTokens),
+  }));
+
+  const projects = rows.map((row) => {
+    const cost = numberOrZero(row.cost);
+    const totalTokens = numberOrZero(row.totalTokens);
+    return {
+      folder: row.folder,
+      name: projectName(row.folder),
+      cost,
+      totalTokens,
+      inputTokens: numberOrZero(row.inputTokens),
+      outputTokens: numberOrZero(row.outputTokens),
+      cacheReadTokens: numberOrZero(row.cacheReadTokens),
+      cacheWriteTokens: numberOrZero(row.cacheWriteTokens),
+      messageCount: Number(row.messageCount),
+      sessionCount: Number(row.sessionCount),
+      firstMessageAt: row.firstMessageAt === null ? null : Number(row.firstMessageAt),
+      lastMessageAt: row.lastMessageAt === null ? null : Number(row.lastMessageAt),
+      effectivePricePerMillion: pricePerMillion(cost, totalTokens),
+      models: perProjectModels.get(row.folder) ?? [],
+    };
+  });
+
+  return {
+    generatedAt: now,
+    period,
+    totals: {
+      cost: projects.reduce((sum, project) => sum + project.cost, 0),
+      totalTokens: projects.reduce((sum, project) => sum + project.totalTokens, 0),
+      messageCount: projects.reduce((sum, project) => sum + project.messageCount, 0),
+      // Session files are unique per project, so the per-project counts add up.
+      sessionCount: projects.reduce((sum, project) => sum + project.sessionCount, 0),
+      projectCount: projects.length,
+    },
+    models,
+    projects,
   };
 }

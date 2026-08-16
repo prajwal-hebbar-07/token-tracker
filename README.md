@@ -47,6 +47,18 @@ model's share of total spend, the number inside it is the blended price actually
 paid per million tokens, and the bar underneath compares that price against the
 priciest model in use.
 
+The **Projects** tab is a page of its own at `http://localhost:3000/projects`. A
+project is the working directory Oh My Pi recorded for each session, so the page
+needs no extra bookkeeping. Every project is one card carrying its total spend,
+its share of the period's spend as a ring, the tokens and sessions behind that
+number, and the split across the models that did the work. The whole breakdown
+arrives in a single request, so no card has to be opened to read it.
+
+The API serves `GET /api/dashboard?period=today|month|all` for the dashboard and
+`GET /api/projects?period=today|month|all` for the projects page, and
+`POST /api/import` for the fetch button. All three default to the whole history
+when no period is given.
+
 ## Configuration
 
 | Variable | Default | Purpose |

@@ -1,6 +1,8 @@
 "use client";
 
 import { type CSSProperties, useCallback, useEffect, useState } from "react";
+import { compactNumber, fullNumber, hiddenModels, money, preciseMoney, priceLabel, requestJson } from "./lib";
+import { AppNav } from "./nav";
 
 interface Dashboard {
   generatedAt: number;
@@ -65,29 +67,6 @@ const periods: Array<{ value: DashboardPeriod; label: string; eyebrow: string }>
   { value: "all", label: "All time", eyebrow: "ALL-TIME SPEND" },
 ];
 
-const money = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-const preciseMoney = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 4,
-});
-const compactNumber = new Intl.NumberFormat("en-US", {
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
-const fullNumber = new Intl.NumberFormat("en-US");
-const hiddenModels: Record<string, true> = {
-  "claude-opus-4-8": true,
-  "kimi-k2.7-code": true,
-  "kimi-k3": true,
-};
-
 function isDashboard(value: unknown): value is Dashboard {
   if (!value || typeof value !== "object") return false;
   if (!("summary" in value) || !("models" in value) || !("categories" in value)) return false;
@@ -115,32 +94,11 @@ function formatLimitAmount(value: number | null, unit: string): string {
   return fullNumber.format(value);
 }
 
-// Zero cost with tokens spent means the provider charged nothing; a null price
-// means the model has no priced usage at all. They are not the same thing.
-function priceLabel(price: number | null): { value: string; caption: string } {
-  if (price === null) return { value: "—", caption: "not priced yet" };
-  if (price === 0) return { value: "Free", caption: "no recorded cost" };
-  return { value: preciseMoney.format(price), caption: "per 1M tokens" };
-}
-
 function limitTone(quota: { status: string; usedFraction: number | null }): string {
   if (quota.status !== "ok") return "critical";
   const used = quota.usedFraction ?? 0;
   if (used >= 0.9) return "critical";
   return used >= 0.7 ? "warn" : "safe";
-}
-
-async function requestJson(path: string, init?: RequestInit): Promise<unknown> {
-  const response = await fetch(path, { ...init, cache: "no-store" });
-  const payload: unknown = await response.json();
-  if (!response.ok) {
-    let message = `Request failed with status ${response.status}`;
-    if (payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string") {
-      message = payload.error;
-    }
-    throw new Error(message);
-  }
-  return payload;
 }
 
 export default function DashboardPage() {
@@ -217,6 +175,7 @@ export default function DashboardPage() {
             <h1>Token Tracker</h1>
           </div>
         </div>
+        <AppNav />
         <div className="headerActions">
           <div className="syncMeta">
             <span className="statusDot" />

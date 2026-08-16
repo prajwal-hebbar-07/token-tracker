@@ -634,6 +634,247 @@ h2 {
   background: linear-gradient(90deg, color-mix(in srgb, var(--tone) 40%, #0b0c0f), var(--tone));
 }
 
+.appNav {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--panel);
+}
+
+.appNav a {
+  display: grid;
+  min-height: 34px;
+  padding: 0 16px;
+  place-items: center;
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.appNav a:hover,
+.appNav a.active {
+  color: var(--text);
+  background: var(--panel-strong);
+}
+
+.appNav a.active {
+  color: var(--lime);
+}
+
+.projectSplit {
+  display: flex;
+  gap: 2px;
+  height: 14px;
+  margin-top: 18px;
+  overflow: hidden;
+  border-radius: 100px;
+  background: #23262e;
+}
+
+.projectSplitSeg {
+  min-width: 2px;
+  background: linear-gradient(180deg, var(--tone), color-mix(in srgb, var(--tone) 55%, #0b0c0f));
+}
+
+.projectSplitKeys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 14px;
+}
+
+.projectSplitKey {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.projectSplitKey::before {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: var(--tone);
+  content: "";
+}
+
+.projectSplitKey.muted::before {
+  background: #3a3f49;
+}
+
+.modelLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 18px;
+}
+
+.modelLegendItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 100px;
+  background: var(--panel-strong);
+  font-size: 12px;
+}
+
+.modelLegendItem i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--tone);
+}
+
+.modelLegendItem small {
+  color: var(--muted);
+}
+
+.projectGrid {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(292px, 1fr));
+}
+
+.projectCard {
+  display: flex;
+  flex-direction: column;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tone) 6%, var(--panel-strong)), var(--panel));
+}
+
+.projectCardTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 22px;
+}
+
+.projectRank {
+  color: var(--tone);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.projectName {
+  margin: 12px 0 0;
+  overflow-wrap: anywhere;
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+.projectMeta {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.projectHeadline {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.projectSpend {
+  display: grid;
+  gap: 3px;
+}
+
+.projectSpend strong {
+  font-size: 24px;
+  letter-spacing: -0.02em;
+}
+
+.projectSpend span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.projectStats {
+  display: grid;
+  gap: 10px 12px;
+  margin: 16px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.projectStats dt {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.projectStats dd {
+  margin: 2px 0 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.projectModelBar {
+  display: flex;
+  gap: 2px;
+  height: 7px;
+  margin-top: 16px;
+  overflow: hidden;
+  border-radius: 100px;
+  background: #23262e;
+}
+
+.projectModelSeg {
+  min-width: 2px;
+  background: var(--tone);
+}
+
+.projectModels {
+  display: grid;
+  gap: 7px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.projectModels li {
+  display: grid;
+  align-items: center;
+  gap: 8px;
+  grid-template-columns: 9px 1fr auto auto;
+  font-size: 12px;
+}
+
+.projectModels i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--tone);
+}
+
+.projectModels span {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projectModels small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
 @media (max-width: 980px) {
   .shell {
     padding-inline: 22px;
@@ -653,6 +894,12 @@ h2 {
 
   .limitGrid {
     grid-template-columns: 1fr;
+  }
+
+  .topbar {
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 16px 0;
   }
 }
 
@@ -704,5 +951,9 @@ h2 {
 
   .modelDeck {
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+
+  .projectGrid {
+    grid-template-columns: 1fr;
   }
 }
