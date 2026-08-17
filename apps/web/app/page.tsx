@@ -101,6 +101,12 @@ function limitTone(quota: { status: string; usedFraction: number | null }): stri
   return used >= 0.7 ? "warn" : "safe";
 }
 
+// The window is created once per app launch, so this module is evaluated once
+// per launch too: the flag makes the automatic import fire on opening the app
+// and never again, not even when the page segment remounts after navigating to
+// the projects page and back.
+let autoFetched = false;
+
 export default function DashboardPage() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const { period } = usePeriod();
@@ -154,6 +160,16 @@ export default function DashboardPage() {
       setImporting(false);
     }
   }, [loadDashboard]);
+
+  // Opening the app imports once on its own, so what is on screen is what Oh My
+  // Pi has recorded without the button having to be pressed. Every later refresh
+  // stays manual. The flag lives outside the component, so a period change or a
+  // return from the projects page re-runs this effect without re-importing.
+  useEffect(() => {
+    if (autoFetched) return;
+    autoFetched = true;
+    void fetchUsage();
+  }, [fetchUsage]);
 
   const limits = dashboard?.limits ?? null;
   // A card whose every window is hidden has nothing left to say, so it goes too.

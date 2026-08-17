@@ -5,7 +5,9 @@ import {
   type ImportResult,
   importFromOmp,
   openTrackerDatabase,
+  readPreferences,
   saveLimitsSnapshot,
+  savePreferences,
 } from "./db.js";
 import { readProviderLimits, syncOmpSessions } from "./omp-cli.js";
 
@@ -16,7 +18,7 @@ const tracker = openTrackerDatabase();
 function sendJson(response: ServerResponse, status: number, payload: unknown): void {
   response.writeHead(status, {
     "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
     "Access-Control-Allow-Origin": process.env.WEB_ORIGIN ?? "http://localhost:3000",
     "Cache-Control": "no-store",
     "Content-Type": "application/json; charset=utf-8",
@@ -77,6 +79,33 @@ const server = createServer(async (request, response) => {
       if (limits.snapshot) saveLimitsSnapshot(tracker, limits.snapshot);
 
       sendJson(response, 200, { result, warnings, dashboard: getDashboard(tracker) });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/preferences") {
+      sendJson(response, 200, readPreferences(tracker));
+      return;
+    }
+
+    if (request.method === "PUT" && url.pathname === "/api/preferences") {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(chunk as Buffer);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      } catch {
+        sendJson(response, 400, { error: "preferences must be a JSON object" });
+        return;
+      }
+      if (!parsed || typeof parsed !== "object" || !("hiddenLimits" in parsed) || !Array.isArray(parsed.hiddenLimits)) {
+        sendJson(response, 400, { error: "preferences must be a JSON object" });
+        return;
+      }
+      const preferences = {
+        hiddenLimits: parsed.hiddenLimits.filter((entry): entry is string => typeof entry === "string"),
+      };
+      savePreferences(tracker, preferences);
+      sendJson(response, 200, preferences);
       return;
     }
 

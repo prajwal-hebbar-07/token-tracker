@@ -330,6 +330,14 @@ export function openTrackerDatabase(filePath = getTrackerDatabasePath()): Databa
       captured_at INTEGER NOT NULL,
       payload TEXT NOT NULL
     );
+
+    -- Interface choices that must outlive the window. The desktop app binds an
+    -- ephemeral loopback port, so the webview origin changes on every launch and
+    -- its own localStorage is a different bucket each time; only this file survives.
+    CREATE TABLE IF NOT EXISTS preferences (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    ) WITHOUT ROWID;
   `);
   const columns = db.prepare("PRAGMA table_info(usage_messages)").all();
   if (!columns.some((column) => column.name === "category")) {
@@ -533,6 +541,37 @@ export function saveLimitsSnapshot(tracker: DatabaseSync, snapshot: LimitsSnapsh
     INSERT INTO limit_snapshots (id, captured_at, payload) VALUES (1, ?, ?)
     ON CONFLICT(id) DO UPDATE SET captured_at = excluded.captured_at, payload = excluded.payload
   `).run(snapshot.capturedAt, JSON.stringify(snapshot));
+}
+
+export interface Preferences {
+  hiddenLimits: string[];
+}
+
+// Every interface choice is one JSON document under its own key, so adding a
+// second preference later needs no schema change.
+const hiddenLimitsKey = "hiddenLimits";
+
+export function readPreferences(tracker: DatabaseSync): Preferences {
+  const row = tracker.prepare("SELECT value FROM preferences WHERE key = ?").get(hiddenLimitsKey);
+  const stored = row && typeof row === "object" && "value" in row ? row.value : null;
+  if (typeof stored !== "string") return { hiddenLimits: [] };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stored);
+  } catch {
+    // A document written by an older build can disagree with the current shape,
+    // so a parse failure reads as "nothing hidden" instead of failing the read.
+    return { hiddenLimits: [] };
+  }
+  if (!Array.isArray(parsed)) return { hiddenLimits: [] };
+  return { hiddenLimits: parsed.filter((entry): entry is string => typeof entry === "string") };
+}
+
+export function savePreferences(tracker: DatabaseSync, preferences: Preferences): void {
+  tracker.prepare(`
+    INSERT INTO preferences (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `).run(hiddenLimitsKey, JSON.stringify(preferences.hiddenLimits));
 }
 
 function readLimitsSnapshot(tracker: DatabaseSync): LimitsSnapshot | null {

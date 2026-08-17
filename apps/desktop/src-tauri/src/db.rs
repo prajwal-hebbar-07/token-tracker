@@ -17,8 +17,8 @@ use rusqlite::types::ValueRef;
 use rusqlite::{params, Connection, OpenFlags};
 
 use crate::model::{
-    CategorySpend, Dashboard, ImportResult, LastSync, LimitsSnapshot, ModelSpend, Period, Project,
-    ProjectModel, ProjectModelTotal, ProjectTotals, ProjectsReport, Summary,
+    CategorySpend, Dashboard, ImportResult, LastSync, LimitsSnapshot, ModelSpend, Period,
+    Preferences, Project, ProjectModel, ProjectModelTotal, ProjectTotals, ProjectsReport, Summary,
 };
 use crate::session::{classify_entry, read_session_file, SessionFile, DEFAULT_CATEGORY};
 
@@ -36,6 +36,9 @@ const USAGE_COLUMNS: &str = "
   cost_input, cost_output, cost_cache_read, cost_cache_write, cost_total,
   agent_type, cost_no_cache_input
 ";
+
+/// Preference row holding the quota keys the panel is hiding.
+const HIDDEN_LIMITS_KEY: &str = "hiddenLimits";
 
 // The macOS per-user temp root, matched by shape. std::env::temp_dir() only
 // reports the value of TMPDIR in this process, so an app launched without it
@@ -359,6 +362,14 @@ impl Store {
       captured_at INTEGER NOT NULL,
       payload TEXT NOT NULL
     );
+
+    -- Interface choices that must outlive the window. The loopback port is
+    -- ephemeral, so the webview origin changes on every launch and its own
+    -- localStorage is a different bucket each time; only this file survives.
+    CREATE TABLE IF NOT EXISTS preferences (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    ) WITHOUT ROWID;
             "#,
         )?;
 
@@ -645,6 +656,40 @@ impl Store {
         // A snapshot written by an older build can disagree with the current
         // shape, so a parse failure means "no snapshot" rather than an error.
         Ok(serde_json::from_str::<LimitsSnapshot>(&payload).ok())
+    }
+
+    /// Every interface choice is one JSON document under its own key, so adding
+    /// a second preference later needs no schema change.
+    pub fn read_preferences(&self) -> Result<Preferences> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT value FROM preferences WHERE key = ?")?;
+        let mut rows = statement.query(params![HIDDEN_LIMITS_KEY])?;
+        let stored = match rows.next()? {
+            None => None,
+            Some(row) => loose_opt_text(row.get_ref(0)?),
+        };
+        // A document written by an older build can disagree with the current
+        // shape, so a parse failure reads as "nothing hidden" instead of
+        // failing the request and blanking the panel.
+        let hidden_limits = stored
+            .and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
+            .unwrap_or_default();
+        Ok(Preferences { hidden_limits })
+    }
+
+    pub fn save_preferences(&self, preferences: &Preferences) -> Result<()> {
+        self.connection.execute(
+            r#"
+    INSERT INTO preferences (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            "#,
+            params![
+                HIDDEN_LIMITS_KEY,
+                serde_json::to_string(&preferences.hidden_limits)?
+            ],
+        )?;
+        Ok(())
     }
 
     pub fn dashboard(&self, period: Period, now: i64) -> Result<Dashboard> {

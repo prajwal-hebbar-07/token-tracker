@@ -19,9 +19,10 @@ const PeriodContext = createContext<PeriodState | null>(null);
 
 // The selected period lives in the root layout, which stays mounted while the
 // page segment swaps, so moving between the dashboard and the projects page
-// keeps whatever period was picked.
+// keeps whatever period was picked. Every launch starts on today's spend, which
+// is the number the app is opened to read.
 export function PeriodProvider({ children }: Readonly<{ children: ReactNode }>) {
-  const [period, setPeriod] = useState<Period>("month");
+  const [period, setPeriod] = useState<Period>("today");
 
   return <PeriodContext.Provider value={{ period, setPeriod }}>{children}</PeriodContext.Provider>;
 }

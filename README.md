@@ -43,14 +43,15 @@ to `127.0.0.1` on an ephemeral port, serves the dashboard bundle that is
 embedded in the binary, answers `/api/*` from the same origin so the interface
 needs no separate backend, and then opens a native window on that address.
 
-The dashboard is deliberately not a background service: nothing is imported or
-refreshed until the **Fetch Oh My Pi data** button is pressed.
+Opening the app imports once on its own, so the dashboard shows what Oh My Pi
+has recorded without anything having to be pressed. That is the only automatic
+run: there is no polling and no background sync, and every later refresh is the
+**Fetch Oh My Pi data** button.
 
 ## Using the dashboard
 
-Open the installed app, then click **Fetch Oh My Pi data**. That button does
-three things and nothing happens without it — there is no polling or background
-sync:
+Opening the installed app runs one import by itself, and **Fetch Oh My Pi data**
+runs the same three steps again on demand:
 
 1. Runs `omp stats --json`, which tails `~/.omp/agent/sessions/` into
    `~/.omp/stats.db`. Nothing else advances that database, so skipping this step
@@ -84,9 +85,11 @@ The **Account limits** panel has a *Visible limits* control in its header for
 choosing which quotas to display. Each quota is addressed by provider, account
 and window, because the same provider can appear twice under two different
 accounts and still report identically named windows. Hiding every window of a
-provider removes its card from the panel. The choice lives in the app's own web
-storage under the `localStorage` key `token-tracker.hidden-limits`, so it is per
-install, it survives restarts, and it never reaches the API or the database.
+provider removes its card from the panel. The choice is stored in the app's
+own SQLite database through `/api/preferences`, so it is per install and it
+survives quitting the app. The window cannot keep it itself: the local
+server binds an ephemeral port, so every launch is a new origin with an
+empty `localStorage`.
 
 ## Where the data lives
 

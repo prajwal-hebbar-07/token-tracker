@@ -49,6 +49,23 @@ impl Client {
             .unwrap_or_else(|error| panic!("GET {path} was not JSON: {error}: {body}"));
         (status, value)
     }
+
+    fn put(&self, path: &str, body: &str) -> (u16, Value) {
+        let mut response = self
+            .agent
+            .put(format!("{}{path}", self.base))
+            .content_type("application/json")
+            .send(body)
+            .unwrap_or_else(|error| panic!("PUT {path} failed: {error}"));
+        let status = response.status().as_u16();
+        let body = response
+            .body_mut()
+            .read_to_string()
+            .unwrap_or_else(|error| panic!("PUT {path} body failed: {error}"));
+        let value = serde_json::from_str(&body)
+            .unwrap_or_else(|error| panic!("PUT {path} was not JSON: {error}: {body}"));
+        (status, value)
+    }
 }
 
 #[test]
@@ -70,7 +87,7 @@ fn serves_the_dashboard_and_the_api_from_one_origin() {
         .build()
         .into();
     let client = Client {
-        agent,
+        agent: agent.clone(),
         base: format!("http://127.0.0.1:{port}"),
     };
 
@@ -137,6 +154,44 @@ fn serves_the_dashboard_and_the_api_from_one_origin() {
     assert_eq!(
         status, 404,
         "a missing asset must not fall back to the shell"
+    );
+
+    // Hidden quotas have to outlive the window. The loopback port is ephemeral,
+    // so the webview origin — and its localStorage — is different on every
+    // launch; only the database survives, which is what this asserts.
+    let (status, empty) = client.json("/api/preferences");
+    assert_eq!(status, 200, "the preferences route failed: {empty}");
+    assert_eq!(empty["hiddenLimits"], Value::Array(Vec::new()));
+
+    let hidden = r#"{"hiddenLimits":["anthropic/[email protected]/anthropic:5h"]}"#;
+    let (status, saved) = client.put("/api/preferences", hidden);
+    assert_eq!(status, 200, "the preference write failed: {saved}");
+    assert_eq!(
+        saved["hiddenLimits"][0],
+        Value::from("anthropic/[email protected]/anthropic:5h")
+    );
+
+    let (status, rejected) = client.put("/api/preferences", "not json");
+    assert_eq!(status, 400, "an unreadable body must not reset the choice");
+    assert_eq!(
+        rejected["error"],
+        Value::from("preferences must be a JSON object")
+    );
+
+    // A second server on the same file is what a relaunch looks like from the
+    // dashboard's side: a new port, a new origin, the same stored choice.
+    let relaunch_port = server::start(&tracker_path, 0).expect("the local server did not restart");
+    assert_ne!(relaunch_port, port, "the relaunch reused the first port");
+    let relaunched = Client {
+        agent: agent.clone(),
+        base: format!("http://127.0.0.1:{relaunch_port}"),
+    };
+    let (status, kept) = relaunched.json("/api/preferences");
+    assert_eq!(status, 200, "the relaunched preferences route failed: {kept}");
+    assert_eq!(
+        kept["hiddenLimits"][0],
+        Value::from("anthropic/[email protected]/anthropic:5h"),
+        "the hidden quota did not survive a relaunch"
     );
 
     std::fs::remove_dir_all(&directory).ok();

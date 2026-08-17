@@ -13,7 +13,7 @@ use serde_json::json;
 use tiny_http::{Header, Method, Request, Response, Server};
 
 use crate::db::{now_millis, omp_stats_path, Store};
-use crate::model::Period;
+use crate::model::{Period, Preferences};
 use crate::omp::{read_provider_limits, sync_omp_sessions};
 
 /// The exported dashboard, embedded at compile time from `apps/web/out`.
@@ -191,7 +191,19 @@ fn import_reply(store: &Store) -> Reply {
     }
 }
 
-fn api_reply(backend: &Backend, method: &Method, path: &str, query: Option<&str>) -> Reply {
+/// Parses the body of a preference write. A body this build cannot read is a
+/// client error rather than a silent reset of the user's choice.
+fn preferences_from(body: Option<String>) -> Option<Preferences> {
+    serde_json::from_str::<Preferences>(&body?).ok()
+}
+
+fn api_reply(
+    backend: &Backend,
+    method: &Method,
+    path: &str,
+    query: Option<&str>,
+    body: Option<String>,
+) -> Reply {
     const BAD_PERIOD: &str = "period must be today, month, or all";
 
     let store = match backend {
@@ -215,12 +227,23 @@ fn api_reply(backend: &Backend, method: &Method, path: &str, query: Option<&str>
                 Err(error) => Reply::error(500, error.to_string()),
             },
         },
+        (Method::Get, "/api/preferences") => match store.read_preferences() {
+            Ok(preferences) => Reply::json(200, &preferences),
+            Err(error) => Reply::error(500, error.to_string()),
+        },
+        (Method::Put, "/api/preferences") => match preferences_from(body) {
+            None => Reply::error(400, "preferences must be a JSON object"),
+            Some(preferences) => match store.save_preferences(&preferences) {
+                Ok(()) => Reply::json(200, &preferences),
+                Err(error) => Reply::error(500, error.to_string()),
+            },
+        },
         (Method::Post, "/api/import") => import_reply(store),
         _ => Reply::error(404, "Not found"),
     }
 }
 
-fn reply_for(backend: &Backend, request: &Request) -> Reply {
+fn reply_for(backend: &Backend, request: &mut Request) -> Reply {
     let url = request.url().to_string();
     let (path, query) = match url.split_once('?') {
         Some((path, query)) => (path, Some(query)),
@@ -228,7 +251,15 @@ fn reply_for(backend: &Backend, request: &Request) -> Reply {
     };
 
     if path == "/health" || path.starts_with("/api/") {
-        return api_reply(backend, request.method(), path, query);
+        // The body has to be read before the method is matched, because the
+        // reader borrows the request; only the preference write carries one.
+        let body = if request.method() == &Method::Put {
+            let mut body = String::new();
+            request.as_reader().read_to_string(&mut body).ok().map(|_| body)
+        } else {
+            None
+        };
+        return api_reply(backend, request.method(), path, query, body);
     }
     if request.method() != &Method::Get && request.method() != &Method::Head {
         return Reply::error(404, "Not found");
@@ -273,8 +304,8 @@ pub fn start(tracker_path: &Path, requested_port: u16) -> Result<u16, String> {
     std::thread::Builder::new()
         .name("token-tracker-api".to_string())
         .spawn(move || {
-            for request in server.incoming_requests() {
-                let reply = reply_for(&backend, &request);
+            for mut request in server.incoming_requests() {
+                let reply = reply_for(&backend, &mut request);
                 respond(request, reply);
             }
         })

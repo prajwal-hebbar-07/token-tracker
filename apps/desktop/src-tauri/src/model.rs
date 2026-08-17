@@ -182,3 +182,14 @@ pub struct ProjectsReport {
     pub models: Vec<ProjectModelTotal>,
     pub projects: Vec<Project>,
 }
+
+/// Interface choices the dashboard stores server-side. The window's own
+/// `localStorage` cannot hold them: the loopback port is ephemeral, so each
+/// launch is a new origin with an empty storage bucket.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Preferences {
+    /// Quota keys the Account limits panel is hiding, as `provider/account/window`.
+    #[serde(default)]
+    pub hidden_limits: Vec<String>,
+}
