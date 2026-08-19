@@ -1,7 +1,7 @@
 "use client";
 
 import { type CSSProperties, useCallback, useEffect, useState } from "react";
-import { compactNumber, fullNumber, hiddenModels, money, preciseMoney, priceLabel, requestJson } from "./lib";
+import { compactNumber, estimatedModels, fullNumber, hiddenModels, money, preciseMoney, priceLabel, requestJson } from "./lib";
 import { LimitFilter, limitKey, useHiddenLimits } from "./limit-filter";
 import { AppNav } from "./nav";
 import { type Period, PeriodTabs, usePeriod } from "./period";
@@ -257,7 +257,7 @@ export default function DashboardPage() {
               </p>
             </div>
             <div className="heroNote">
-              Oh My Pi recorded costs are used when available. MiniMax-M3 is estimated from official standard pay-as-you-go rates, which double above 512k input tokens.
+              Oh My Pi recorded costs are used when available. MiniMax-M3 and Kimi K2.6 are billed as free by Ollama Cloud, so they are estimated from official standard pay-as-you-go rates; MiniMax rates double above 512k input tokens.
             </div>
           </section>
 
@@ -412,7 +412,7 @@ export default function DashboardPage() {
                     <h3>{model.model}</h3>
                     <p className="modelProvider">
                       {model.provider}
-                      {model.model.toLowerCase() === "minimax-m3" ? " · estimated" : ""}
+                      {estimatedModels[model.model.toLowerCase()] ? " · estimated" : ""}
                     </p>
 
                     <div className="modelSpend">

@@ -118,12 +118,28 @@ export interface ProjectsReport {
   }>;
 }
 
-// Standard pay-as-you-go rates published by MiniMax on 2026-08-15.
+// Providers that hand out a model for free still leave the question of what it
+// would have cost, so those rows are estimated from the model's published
+// pay-as-you-go rates instead of the zero the provider recorded. Ollama Cloud
+// reports no cache hits, so every prompt token is billed at the cache-miss rate.
+interface EstimatedPrice {
+  inputPerMillion: number;
+  outputPerMillion: number;
+  cacheReadPerMillion: number;
+  // MiniMax doubles every rate once a prompt crosses this many tokens. Moonshot
+  // publishes one flat rate for Kimi, so there is no tier to cross.
+  tierLimit: number | null;
+}
+
+// MiniMax M3 rates published 2026-08-15:
 // https://platform.minimax.io/docs/guides/pricing-paygo
-const MINIMAX_M3_CONTEXT_LIMIT = 512_000;
-const MINIMAX_M3_INPUT_PER_MILLION = 0.3;
-const MINIMAX_M3_OUTPUT_PER_MILLION = 1.2;
-const MINIMAX_M3_CACHE_READ_PER_MILLION = 0.06;
+// Kimi K2.6 rates published 2026-08-19:
+// https://platform.kimi.ai/docs/pricing/chat-k26
+const ESTIMATED_PRICES: Record<string, EstimatedPrice> = {
+  "minimax-m3": { inputPerMillion: 0.3, outputPerMillion: 1.2, cacheReadPerMillion: 0.06, tierLimit: 512_000 },
+  "kimi-k2.6": { inputPerMillion: 0.95, outputPerMillion: 4, cacheReadPerMillion: 0.16, tierLimit: null },
+};
+
 type UsageCategory =
   | "Design"
   | "Development"
@@ -430,14 +446,17 @@ export function importFromOmp(
         let costTotal = row.cost_total;
         let costNoCacheInput = row.cost_no_cache_input;
 
-        if (row.model.toLowerCase() === "minimax-m3") {
+        const model = row.model.toLowerCase();
+        const estimate = Object.hasOwn(ESTIMATED_PRICES, model) ? ESTIMATED_PRICES[model] : undefined;
+        if (estimate) {
           const promptTokens = row.input_tokens + row.cache_read_tokens + row.cache_write_tokens;
-          const tierMultiplier = promptTokens > MINIMAX_M3_CONTEXT_LIMIT ? 2 : 1;
-          const inputRate = MINIMAX_M3_INPUT_PER_MILLION * tierMultiplier;
+          const tierMultiplier =
+            estimate.tierLimit !== null && promptTokens > estimate.tierLimit ? 2 : 1;
+          const inputRate = estimate.inputPerMillion * tierMultiplier;
           costInput = (row.input_tokens * inputRate) / 1_000_000;
-          costOutput = (row.output_tokens * MINIMAX_M3_OUTPUT_PER_MILLION * tierMultiplier) / 1_000_000;
+          costOutput = (row.output_tokens * estimate.outputPerMillion * tierMultiplier) / 1_000_000;
           costCacheRead =
-            (row.cache_read_tokens * MINIMAX_M3_CACHE_READ_PER_MILLION * tierMultiplier) / 1_000_000;
+            (row.cache_read_tokens * estimate.cacheReadPerMillion * tierMultiplier) / 1_000_000;
           costCacheWrite = 0;
           costTotal = costInput + costOutput + costCacheRead;
           costNoCacheInput = (promptTokens * inputRate) / 1_000_000;

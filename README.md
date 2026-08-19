@@ -64,10 +64,14 @@ If either `omp` call fails the import still completes — with the existing stat
 snapshot, and with the previously stored limits — and the dashboard shows a
 warning instead of pretending the data is current.
 
-MiniMax-M3 rows are estimated using [MiniMax standard pay-as-you-go
-pricing](https://platform.minimax.io/docs/guides/pricing-paygo): $0.30 input,
-$1.20 output, and $0.06 cache-read per million tokens up to 512k input tokens.
-Those rates double for longer inputs; passive cache writes have no added fee.
+Rows from models Ollama Cloud bills as free are estimated from the provider's
+published pay-as-you-go rates, so the spend they would have cost is still
+visible. [MiniMax-M3](https://platform.minimax.io/docs/guides/pricing-paygo):
+$0.30 input, $1.20 output, and $0.06 cache-read per million tokens up to 512k
+input tokens, with those rates doubling for longer inputs.
+[Kimi K2.6](https://platform.kimi.ai/docs/pricing/chat-k26): $0.95 input, $4.00
+output, and $0.16 cache-read per million tokens, flat at every prompt length.
+Passive cache writes have no added fee under either.
 
 Model spend is shown as a deck of cards rather than a table: each ring is that
 model's share of total spend, the number inside it is the blended price actually

@@ -58,7 +58,7 @@ writeSession(session3, "Investigate competing model capabilities on their websit
 writeSession(session4, "Reason about the best architecture and tradeoffs.", ["entry-5"]);
 writeSession(session5, "Add a smoke probe command.", ["entry-6"], scratchWorkspace);
 writeSession(session6, "Update the release pipeline.", ["entry-7"]);
-writeSession(session7, "Explain how does the cache read pricing work.", ["entry-8"]);
+writeSession(session7, "Explain how does the cache read pricing work.", ["entry-8", "entry-11"]);
 
 const source = new DatabaseSync(sourcePath);
 source.exec(`
@@ -115,6 +115,9 @@ insert.run(8, session7, "entry-8", "workspace-delta", "zero-model", "openai", "r
 // Anchored to the caller's clock so the today and month windows are non-empty.
 insert.run(9, session1, "entry-9", "workspace-alpha", "claude-opus-5", "anthropic", "messages", now - 1_000, 110, 52, "stop", null, 1_500, 150, 1_000, 500, 3_150, 0, 0.007, 0.003, 0.0005, 0.005, 0.0155, "main", 0.0155);
 insert.run(10, session2, "entry-10", "workspace-beta", "gpt-test", "openai", "responses", now - 40 * day, 75, 38, "stop", null, 400, 40, 0, 0, 440, 0, 0.0008, 0.0004, 0, 0, 0.0012, "main", 0.0012);
+// Kimi K2.6 with a prompt past MiniMax's tier boundary: the flat Moonshot rates
+// must apply unchanged, in both implementations.
+insert.run(11, session7, "entry-11", "workspace-delta", "kimi-k2.6", "ollama-cloud", "ollama", 1_700_300_250_000, 92, 46, "stop", null, 600_000, 10_000, 50_000, 0, 660_000, 0, 0, 0, 0, 0, 0, "task", 0);
 source.close();
 
 const tracker = openTrackerDatabase(join(directory, "tracker-ts.sqlite"));

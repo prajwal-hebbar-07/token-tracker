@@ -22,12 +22,50 @@ use crate::model::{
 };
 use crate::session::{classify_entry, read_session_file, SessionFile, DEFAULT_CATEGORY};
 
-// Standard pay-as-you-go rates published by MiniMax on 2026-08-15.
+/// Published pay-as-you-go rates for models a provider hands out for free, so a
+/// zero-cost row still shows what it would have cost. Ollama Cloud reports no
+/// cache hits, so every prompt token is billed at the cache-miss rate.
+struct EstimatedPrice {
+    input_per_million: f64,
+    output_per_million: f64,
+    cache_read_per_million: f64,
+    /// MiniMax doubles every rate once a prompt crosses this many tokens.
+    /// Moonshot publishes one flat rate for Kimi, so there is no tier to cross.
+    tier_limit: Option<i64>,
+}
+
+// MiniMax M3 rates published 2026-08-15:
 // https://platform.minimax.io/docs/guides/pricing-paygo
-const MINIMAX_M3_CONTEXT_LIMIT: i64 = 512_000;
-const MINIMAX_M3_INPUT_PER_MILLION: f64 = 0.3;
-const MINIMAX_M3_OUTPUT_PER_MILLION: f64 = 1.2;
-const MINIMAX_M3_CACHE_READ_PER_MILLION: f64 = 0.06;
+// Kimi K2.6 rates published 2026-08-19:
+// https://platform.kimi.ai/docs/pricing/chat-k26
+const ESTIMATED_PRICES: &[(&str, EstimatedPrice)] = &[
+    (
+        "minimax-m3",
+        EstimatedPrice {
+            input_per_million: 0.3,
+            output_per_million: 1.2,
+            cache_read_per_million: 0.06,
+            tier_limit: Some(512_000),
+        },
+    ),
+    (
+        "kimi-k2.6",
+        EstimatedPrice {
+            input_per_million: 0.95,
+            output_per_million: 4.0,
+            cache_read_per_million: 0.16,
+            tier_limit: None,
+        },
+    ),
+];
+
+fn estimated_price(model: &str) -> Option<&'static EstimatedPrice> {
+    let model = model.to_lowercase();
+    ESTIMATED_PRICES
+        .iter()
+        .find(|(name, _)| *name == model)
+        .map(|(_, price)| price)
+}
 
 const USAGE_COLUMNS: &str = "
   session_file, entry_id, folder, model, provider, api, timestamp, duration,
@@ -548,22 +586,21 @@ impl Store {
                 let mut cost_total = row.cost_total;
                 let mut cost_no_cache_input = row.cost_no_cache_input;
 
-                if row.model.to_lowercase() == "minimax-m3" {
+                if let Some(estimate) = estimated_price(&row.model) {
                     let prompt_tokens =
                         row.input_tokens + row.cache_read_tokens + row.cache_write_tokens;
-                    let tier_multiplier = if prompt_tokens > MINIMAX_M3_CONTEXT_LIMIT {
-                        2.0
-                    } else {
-                        1.0
+                    let tier_multiplier = match estimate.tier_limit {
+                        Some(limit) if prompt_tokens > limit => 2.0,
+                        _ => 1.0,
                     };
-                    let input_rate = MINIMAX_M3_INPUT_PER_MILLION * tier_multiplier;
+                    let input_rate = estimate.input_per_million * tier_multiplier;
                     cost_input = (row.input_tokens as f64 * input_rate) / 1_000_000.0;
                     cost_output = (row.output_tokens as f64
-                        * MINIMAX_M3_OUTPUT_PER_MILLION
+                        * estimate.output_per_million
                         * tier_multiplier)
                         / 1_000_000.0;
                     cost_cache_read = (row.cache_read_tokens as f64
-                        * MINIMAX_M3_CACHE_READ_PER_MILLION
+                        * estimate.cache_read_per_million
                         * tier_multiplier)
                         / 1_000_000.0;
                     cost_cache_write = 0.0;

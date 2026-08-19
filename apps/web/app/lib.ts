@@ -21,6 +21,13 @@ export const hiddenModels: Record<string, true> = {
   "kimi-k3": true,
 };
 
+// Models the importer prices from published rates because the provider billed
+// nothing. Mirrors ESTIMATED_PRICES in apps/api/src/db.ts.
+export const estimatedModels: Record<string, true> = {
+  "minimax-m3": true,
+  "kimi-k2.6": true,
+};
+
 // Zero cost with tokens spent means the provider charged nothing; a null price
 // means the model has no priced usage at all. They are not the same thing.
 export function priceLabel(price: number | null): { value: string; caption: string } {

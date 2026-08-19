@@ -73,7 +73,7 @@ function assertClose(actual: unknown, expected: number): void {
   assert.ok(Math.abs(actual - expected) < 1e-12);
 }
 
-test("imports OMP rows idempotently and applies recorded and MiniMax prices", () => {
+test("imports OMP rows idempotently and applies recorded and estimated prices", () => {
   const directory = mkdtempSync(join(tmpdir(), "token-tracker-"));
   const sourcePath = join(directory, "omp.sqlite");
   const trackerPath = join(directory, "tracker.sqlite");
@@ -166,6 +166,47 @@ test("imports OMP rows idempotently and applies recorded and MiniMax prices", ()
     const finalLogic = finalDashboard.categories.find((entry) => entry.category === "Logic & planning");
     assert.ok(finalLogic);
     assert.equal(finalLogic.totalTokens, 620_001);
+
+    const insertKimi = source.prepare(`
+      INSERT INTO messages VALUES (
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      )
+    `);
+    insertKimi.run(6, join(directory, "session-5.jsonl"), "entry-6", "workspace-delta", "kimi-k2.6", "ollama-cloud", "ollama", 1_700_345_600_000, 85, 42, "stop", null, 200_000, 20_000, 50_000, 0, 270_000, 0, 0, 0, 0, 0, 0, "task", 0);
+    // Moonshot publishes one flat rate, so a prompt past MiniMax's tier boundary
+    // must not double anything here.
+    insertKimi.run(7, join(directory, "session-6.jsonl"), "entry-7", "workspace-delta", "kimi-k2.6", "ollama-cloud", "ollama", 1_700_432_000_000, 88, 44, "stop", null, 600_000, 10_000, 0, 0, 610_000, 0, 0, 0, 0, 0, 0, "task", 0);
+    const kimiImport = importFromOmp(tracker, sourcePath);
+    assert.equal(kimiImport.newRecords, 2);
+
+    const kimiCached = tracker.prepare(`
+      SELECT cost_input, cost_output, cost_cache_read, cost_cache_write,
+             cost_total, cost_no_cache_input
+      FROM usage_messages
+      WHERE entry_id = 'entry-6'
+    `).get();
+    assert.ok(kimiCached);
+    assertClose(kimiCached.cost_input, 0.19);
+    assertClose(kimiCached.cost_output, 0.08);
+    assertClose(kimiCached.cost_cache_read, 0.008);
+    assertClose(kimiCached.cost_cache_write, 0);
+    assertClose(kimiCached.cost_total, 0.278);
+    assertClose(kimiCached.cost_no_cache_input, 0.2375);
+
+    const kimiLongPrompt = tracker.prepare(`
+      SELECT cost_input, cost_output, cost_total
+      FROM usage_messages
+      WHERE entry_id = 'entry-7'
+    `).get();
+    assert.ok(kimiLongPrompt);
+    assertClose(kimiLongPrompt.cost_input, 0.57);
+    assertClose(kimiLongPrompt.cost_output, 0.04);
+    assertClose(kimiLongPrompt.cost_total, 0.61);
+
+    const kimi = getDashboard(tracker).models.find((model) => model.model === "kimi-k2.6");
+    assert.ok(kimi);
+    assertClose(kimi.cost, 0.888);
+    assertClose(kimi.effectivePricePerMillion, (0.888 / 880_000) * 1_000_000);
   } finally {
     source.close();
     tracker.close();
