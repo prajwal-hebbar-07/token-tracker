@@ -207,6 +207,23 @@ test("imports OMP rows idempotently and applies recorded and estimated prices", 
     assert.ok(kimi);
     assertClose(kimi.cost, 0.888);
     assertClose(kimi.effectivePricePerMillion, (0.888 / 880_000) * 1_000_000);
+    insertKimi.run(8, join(directory, "session-5.jsonl"), "entry-8", "workspace-delta", "kimi-k3", "ollama-cloud", "ollama", 1_700_518_400_000, 90, 45, "stop", null, 200_000, 20_000, 50_000, 0, 270_000, 0, 0, 0, 0, 0, 0, "task", 0);
+    const kimiK3Import = importFromOmp(tracker, sourcePath);
+    assert.equal(kimiK3Import.newRecords, 1);
+
+    const kimiK3 = tracker.prepare(`
+      SELECT cost_input, cost_output, cost_cache_read, cost_cache_write,
+             cost_total, cost_no_cache_input
+      FROM usage_messages
+      WHERE entry_id = 'entry-8'
+    `).get();
+    assert.ok(kimiK3);
+    assertClose(kimiK3.cost_input, 0.6);
+    assertClose(kimiK3.cost_output, 0.3);
+    assertClose(kimiK3.cost_cache_read, 0.015);
+    assertClose(kimiK3.cost_cache_write, 0);
+    assertClose(kimiK3.cost_total, 0.915);
+    assertClose(kimiK3.cost_no_cache_input, 0.75);
   } finally {
     source.close();
     tracker.close();

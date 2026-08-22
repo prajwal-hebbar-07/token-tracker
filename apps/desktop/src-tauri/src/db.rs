@@ -38,6 +38,8 @@ struct EstimatedPrice {
 // https://platform.minimax.io/docs/guides/pricing-paygo
 // Kimi K2.6 rates published 2026-08-19:
 // https://platform.kimi.ai/docs/pricing/chat-k26
+// Kimi K3 rates published 2026-08-22:
+// https://platform.kimi.ai/docs/pricing/chat-k3
 const ESTIMATED_PRICES: &[(&str, EstimatedPrice)] = &[
     (
         "minimax-m3",
@@ -54,6 +56,15 @@ const ESTIMATED_PRICES: &[(&str, EstimatedPrice)] = &[
             input_per_million: 0.95,
             output_per_million: 4.0,
             cache_read_per_million: 0.16,
+            tier_limit: None,
+        },
+    ),
+    (
+        "kimi-k3",
+        EstimatedPrice {
+            input_per_million: 3.0,
+            output_per_million: 15.0,
+            cache_read_per_million: 0.3,
             tier_limit: None,
         },
     ),

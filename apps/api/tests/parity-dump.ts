@@ -60,7 +60,7 @@ writeSession(session3, "Investigate competing model capabilities on their websit
 writeSession(session4, "Reason about the best architecture and tradeoffs.", ["entry-5"]);
 writeSession(session5, "Add a smoke probe command.", ["entry-6"], scratchWorkspace);
 writeSession(session6, "Update the release pipeline.", ["entry-7"]);
-writeSession(session7, "Explain how does the cache read pricing work.", ["entry-8", "entry-11"]);
+writeSession(session7, "Explain how does the cache read pricing work.", ["entry-8", "entry-11", "entry-12"]);
 
 const source = new DatabaseSync(sourcePath);
 source.exec(`
@@ -120,6 +120,8 @@ insert.run(10, session2, "entry-10", "workspace-beta", "gpt-test", "openai", "re
 // Kimi K2.6 with a prompt past MiniMax's tier boundary: the flat Moonshot rates
 // must apply unchanged, in both implementations.
 insert.run(11, session7, "entry-11", "workspace-delta", "kimi-k2.6", "ollama-cloud", "ollama", 1_700_300_250_000, 92, 46, "stop", null, 600_000, 10_000, 50_000, 0, 660_000, 0, 0, 0, 0, 0, 0, "task", 0);
+// Kimi K3 uses its own flat Moonshot rates, not the K2.6 ones.
+insert.run(12, session7, "entry-12", "workspace-delta", "kimi-k3", "ollama-cloud", "ollama", 1_700_300_260_000, 94, 48, "stop", null, 200_000, 20_000, 50_000, 0, 270_000, 0, 0, 0, 0, 0, 0, "task", 0);
 source.close();
 
 const tracker = openTrackerDatabase(join(directory, "tracker-ts.sqlite"));

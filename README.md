@@ -71,6 +71,8 @@ $0.30 input, $1.20 output, and $0.06 cache-read per million tokens up to 512k
 input tokens, with those rates doubling for longer inputs.
 [Kimi K2.6](https://platform.kimi.ai/docs/pricing/chat-k26): $0.95 input, $4.00
 output, and $0.16 cache-read per million tokens, flat at every prompt length.
+[Kimi K3](https://platform.kimi.ai/docs/pricing/chat-k3): $3.00 input, $15.00
+output, and $0.30 cache-read per million tokens, likewise flat.
 Passive cache writes have no added fee under either.
 
 Model spend is shown as a deck of cards rather than a table: each ring is that

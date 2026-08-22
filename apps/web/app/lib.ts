@@ -18,7 +18,6 @@ export const fullNumber = new Intl.NumberFormat("en-US");
 export const hiddenModels: Record<string, true> = {
   "claude-opus-4-8": true,
   "kimi-k2.7-code": true,
-  "kimi-k3": true,
 };
 
 // Models the importer prices from published rates because the provider billed
@@ -26,6 +25,7 @@ export const hiddenModels: Record<string, true> = {
 export const estimatedModels: Record<string, true> = {
   "minimax-m3": true,
   "kimi-k2.6": true,
+  "kimi-k3": true,
 };
 
 // Zero cost with tokens spent means the provider charged nothing; a null price

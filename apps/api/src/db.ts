@@ -161,9 +161,12 @@ interface EstimatedPrice {
 // https://platform.minimax.io/docs/guides/pricing-paygo
 // Kimi K2.6 rates published 2026-08-19:
 // https://platform.kimi.ai/docs/pricing/chat-k26
+// Kimi K3 rates published 2026-08-22:
+// https://platform.kimi.ai/docs/pricing/chat-k3
 const ESTIMATED_PRICES: Record<string, EstimatedPrice> = {
   "minimax-m3": { inputPerMillion: 0.3, outputPerMillion: 1.2, cacheReadPerMillion: 0.06, tierLimit: 512_000 },
   "kimi-k2.6": { inputPerMillion: 0.95, outputPerMillion: 4, cacheReadPerMillion: 0.16, tierLimit: null },
+  "kimi-k3": { inputPerMillion: 3, outputPerMillion: 15, cacheReadPerMillion: 0.3, tierLimit: null },
 };
 
 type UsageCategory =

@@ -253,7 +253,7 @@ export default function DashboardPage() {
               </p>
             </div>
             <div className="heroNote">
-              Oh My Pi recorded costs are used when available. MiniMax-M3 and Kimi K2.6 are billed as free by Ollama Cloud, so they are estimated from official standard pay-as-you-go rates; MiniMax rates double above 512k input tokens.
+              Oh My Pi recorded costs are used when available. MiniMax-M3, Kimi K2.6, and Kimi K3 are billed as free by Ollama Cloud, so they are estimated from official standard pay-as-you-go rates; MiniMax rates double above 512k input tokens.
             </div>
           </section>
 
