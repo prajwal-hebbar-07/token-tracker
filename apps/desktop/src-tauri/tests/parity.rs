@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use chrono::{DateTime, Local};
 use serde_json::Value;
 use token_tracker_desktop::db::Store;
 use token_tracker_desktop::model::{LimitsSnapshot, Period};
@@ -167,12 +168,26 @@ fn port_matches_the_typescript_reference() {
         .save_limits_snapshot(&snapshot)
         .expect("the port could not store the limits snapshot");
 
-    let mut actual = serde_json::json!({ "dashboard": {}, "projects": {} });
-    for (name, period) in [
+    // Both day periods are derived from the same clock the reference generator
+    // was handed, so the two sides name identical local calendar dates.
+    let local_day = |millis: i64| {
+        Period::Day(
+            DateTime::from_timestamp_millis(millis)
+                .expect("the fixture clock is out of range")
+                .with_timezone(&Local)
+                .date_naive(),
+        )
+    };
+    let periods = [
         ("today", Period::Today),
         ("month", Period::Month),
         ("all", Period::All),
-    ] {
+        ("day", local_day(now)),
+        ("pastDay", local_day(now - 40 * 86_400_000)),
+    ];
+
+    let mut actual = serde_json::json!({ "dashboard": {}, "projects": {} });
+    for (name, period) in periods {
         actual["dashboard"][name] = serde_json::to_value(
             store
                 .dashboard(period, now)
@@ -189,7 +204,7 @@ fn port_matches_the_typescript_reference() {
 
     // Each side recorded its own import wall-clock time, so that one field is
     // expected to differ and is neutralised rather than compared.
-    for name in ["today", "month", "all"] {
+    for (name, _) in periods {
         expected["dashboard"][name]["lastSync"]["completedAt"] = Value::from(0);
         actual["dashboard"][name]["lastSync"]["completedAt"] = Value::from(0);
     }

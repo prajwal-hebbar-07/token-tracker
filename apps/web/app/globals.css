@@ -199,31 +199,165 @@ h2 {
   background: var(--panel);
 }
 
-.periodTabs button {
+/* Direct children only: the picker's own calendar buttons are descendants of this
+   control, and an unscoped selector reached in and restyled every day cell. */
+.periodTabs > button,
+.dayPickerTab {
   min-height: 36px;
   padding: 0 14px;
   border: 0;
   border-radius: 7px;
   color: var(--muted);
   background: transparent;
+  font-family: inherit;
   font-size: 12px;
   font-weight: 700;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.periodTabs button:hover:not(:disabled),
-.periodTabs button.active {
+.periodTabs > button:hover:not(:disabled),
+.periodTabs > button.active,
+.dayPickerTab:hover:not(:disabled),
+.dayPickerTab.open,
+.dayPickerTab.active {
   color: var(--text);
   background: var(--panel-strong);
 }
 
-.periodTabs button.active {
+.periodTabs > button.active,
+.dayPickerTab.active {
   color: var(--lime);
 }
 
-.periodTabs button:disabled {
+.periodTabs > button:disabled,
+.dayPickerTab:disabled {
   cursor: wait;
   opacity: 0.58;
+}
+
+/* The trigger sits in the same segmented control as the named windows, because a
+   day is one more choice of period rather than a filter on top of one. Clicking
+   it opens the calendar and does nothing else; the period only changes once a day
+   is actually chosen. */
+.dayPicker {
+  position: relative;
+  display: flex;
+}
+
+.dayPicker > .dayPickerTab {
+  flex: 1;
+}
+
+.dayPickerMenu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  width: 268px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--panel-strong);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+}
+
+.dayPickerHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.dayPickerHead strong {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.dayPickerHead button {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.dayPickerHead button:hover:not(:disabled) {
+  color: var(--lime);
+  border-color: color-mix(in srgb, var(--lime) 40%, var(--line));
+}
+
+.dayPickerHead button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.dayPickerWeek,
+.dayPickerGrid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.dayPickerWeek {
+  margin-bottom: 4px;
+}
+
+.dayPickerWeek span {
+  padding: 4px 0;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.dayPickerDay {
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.dayPickerDay:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--lime) 40%, var(--line));
+  color: var(--lime);
+}
+
+/* Days from the neighbouring months stay selectable, because reaching the 31st
+   from the next month's grid is the whole point of showing them. */
+.dayPickerDay.outside {
+  color: var(--muted);
+  opacity: 0.55;
+}
+
+.dayPickerDay.today {
+  border-color: var(--line);
+}
+
+.dayPickerDay.selected,
+.dayPickerDay.selected.outside {
+  background: rgba(200, 243, 106, 0.16);
+  border-color: var(--lime);
+  color: var(--lime);
+  opacity: 1;
+}
+
+.dayPickerDay:disabled {
+  color: var(--muted);
+  opacity: 0.22;
+  cursor: default;
 }
 
 .emptyState {
@@ -1116,7 +1250,8 @@ h2 {
   }
 
   .appNav a,
-  .periodTabs button {
+  .periodTabs > button,
+  .dayPicker {
     flex: 1;
   }
 }

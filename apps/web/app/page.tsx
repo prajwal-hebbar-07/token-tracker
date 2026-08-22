@@ -4,7 +4,7 @@ import { type CSSProperties, useCallback, useEffect, useState } from "react";
 import { compactNumber, estimatedModels, fullNumber, hiddenModels, money, preciseMoney, priceLabel, requestJson } from "./lib";
 import { LimitFilter, limitKey, useHiddenLimits } from "./limit-filter";
 import { AppNav } from "./nav";
-import { type Period, PeriodTabs, usePeriod } from "./period";
+import { isDay, PeriodTabs, periodEyebrow, periodLabel, usePeriod } from "./period";
 
 interface Dashboard {
   generatedAt: number;
@@ -60,12 +60,6 @@ interface Dashboard {
     }>;
   } | null;
 }
-
-const eyebrows: Record<Period, string> = {
-  today: "TODAY'S SPEND",
-  month: "CURRENT MONTH SPEND",
-  all: "ALL-TIME SPEND",
-};
 
 function isDashboard(value: unknown): value is Dashboard {
   if (!value || typeof value !== "object") return false;
@@ -234,7 +228,7 @@ export default function DashboardPage() {
       ) : dashboard.summary.messageCount === 0 ? (
         <section className="emptyState">
           <p className="emptyKicker">NO USAGE THIS PERIOD</p>
-          <h2>No usage recorded for {period === "today" ? "today" : period === "month" ? "this month" : "all time"}.</h2>
+          <h2>No usage recorded for {periodLabel(period)}.</h2>
           <p>Fetch reads <code>~/.omp/stats.db</code> and updates the saved snapshot in this app.</p>
           <button className="fetchButton large" type="button" onClick={fetchUsage} disabled={importing}>
             {importing ? "Fetching…" : "Fetch usage now"}
@@ -244,16 +238,18 @@ export default function DashboardPage() {
         <>
           <section className="hero">
             <div>
-              <p className="eyebrow">{eyebrows[period]}</p>
+              <p className="eyebrow">{periodEyebrow(period)}</p>
               <div className="totalSpend">{money.format(dashboard.summary.cost)}</div>
               <p className="range">
-                {period === "today"
-                  ? `Today · ${new Date(dashboard.generatedAt).toLocaleDateString()}`
-                  : period === "month"
-                    ? new Date(dashboard.generatedAt).toLocaleDateString(undefined, { month: "long", year: "numeric" })
-                    : dashboard.summary.firstMessageAt
-                      ? `${new Date(dashboard.summary.firstMessageAt).toLocaleDateString()} — ${new Date(dashboard.summary.lastMessageAt ?? dashboard.generatedAt).toLocaleDateString()}`
-                      : "No dated messages"}
+                {isDay(period)
+                  ? periodLabel(period)
+                  : period === "today"
+                    ? `Today · ${new Date(dashboard.generatedAt).toLocaleDateString()}`
+                    : period === "month"
+                      ? new Date(dashboard.generatedAt).toLocaleDateString(undefined, { month: "long", year: "numeric" })
+                      : dashboard.summary.firstMessageAt
+                        ? `${new Date(dashboard.summary.firstMessageAt).toLocaleDateString()} — ${new Date(dashboard.summary.lastMessageAt ?? dashboard.generatedAt).toLocaleDateString()}`
+                        : "No dated messages"}
               </p>
             </div>
             <div className="heroNote">
@@ -310,71 +306,74 @@ export default function DashboardPage() {
             </div>
           </section>
 
-
-          <section className="panel sectionPanel" aria-label="Provider limits">
-            <div className="panelHeading">
-              <div><p className="eyebrow">PROVIDER QUOTAS</p><h2>Account limits</h2></div>
-              <div className="panelHeadingSide">
-                <span>{limits ? `Read ${new Date(limits.capturedAt).toLocaleString()}` : "Not read yet"}</span>
-                {limits && limits.providers.length > 0 && (
-                  <LimitFilter
-                    providers={limits.providers}
-                    hidden={hidden}
-                    setKeysHidden={setKeysHidden}
-                    showEvery={showEvery}
-                  />
-                )}
+          {/* Quotas are a single live reading from each provider, so they say nothing
+              about a day that has already passed. */}
+          {!isDay(period) && (
+            <section className="panel sectionPanel" aria-label="Provider limits">
+              <div className="panelHeading">
+                <div><p className="eyebrow">PROVIDER QUOTAS</p><h2>Account limits</h2></div>
+                <div className="panelHeadingSide">
+                  <span>{limits ? `Read ${new Date(limits.capturedAt).toLocaleString()}` : "Not read yet"}</span>
+                  {limits && limits.providers.length > 0 && (
+                    <LimitFilter
+                      providers={limits.providers}
+                      hidden={hidden}
+                      setKeysHidden={setKeysHidden}
+                      showEvery={showEvery}
+                    />
+                  )}
+                </div>
               </div>
-            </div>
-            {!limits || limits.providers.length === 0 ? (
-              <p className="limitNote">No authenticated accounts reported limits. Fetch reads <code>omp usage --json</code>.</p>
-            ) : visibleProviders.length === 0 ? (
-              <p className="limitNote">Every quota is hidden. Use <em>Visible limits</em> above to bring some back.</p>
-            ) : (
-              <div className="limitGrid">
-                {visibleProviders.map((provider) => (
-                  <article className="limitCard" key={`${provider.provider}/${provider.account ?? "default"}`}>
-                    <div className="limitCardTop">
-                      <strong>{provider.provider}</strong>
-                      {provider.plan && <span className="limitPlan">{provider.plan}</span>}
-                    </div>
-                    <small>{provider.account ?? "single account"}</small>
-                    {provider.windows.length === 0 ? (
-                      <p className="limitNote">{provider.notes[0] ?? "This provider exposes no quota API."}</p>
-                    ) : (
-                      <div className="limitRows">
-                        {provider.windows.map((quota) => {
-                          const tone = limitTone(quota);
-                          const share = quota.usedFraction === null
-                            ? 0
-                            : Math.min(100, Math.max(0, quota.usedFraction * 100));
-                          return (
-                            <div className="limitRow" key={quota.id}>
-                              <div className="limitRowTop">
-                                <span>{quota.label}</span>
-                                <strong className={tone}>
-                                  {formatLimitAmount(quota.used, quota.unit)}
-                                  {quota.limit === null ? "" : ` / ${formatLimitAmount(quota.limit, quota.unit)}`}
-                                </strong>
-                              </div>
-                              <div className="limitTrack">
-                                <div className={`limitFill ${tone}`} style={{ width: `${share}%` }} />
-                              </div>
-                              <small>
-                                {quota.remaining === null ? "" : `${formatLimitAmount(quota.remaining, quota.unit)} left`}
-                                {quota.resetsAt === null ? "" : ` · resets ${new Date(quota.resetsAt).toLocaleString()}`}
-                                {quota.status === "ok" ? "" : ` · ${quota.status}`}
-                              </small>
-                            </div>
-                          );
-                        })}
+              {!limits || limits.providers.length === 0 ? (
+                <p className="limitNote">No authenticated accounts reported limits. Fetch reads <code>omp usage --json</code>.</p>
+              ) : visibleProviders.length === 0 ? (
+                <p className="limitNote">Every quota is hidden. Use <em>Visible limits</em> above to bring some back.</p>
+              ) : (
+                <div className="limitGrid">
+                  {visibleProviders.map((provider) => (
+                    <article className="limitCard" key={`${provider.provider}/${provider.account ?? "default"}`}>
+                      <div className="limitCardTop">
+                        <strong>{provider.provider}</strong>
+                        {provider.plan && <span className="limitPlan">{provider.plan}</span>}
                       </div>
-                    )}
-                  </article>
-                ))}
-              </div>
-            )}
-          </section>
+                      <small>{provider.account ?? "single account"}</small>
+                      {provider.windows.length === 0 ? (
+                        <p className="limitNote">{provider.notes[0] ?? "This provider exposes no quota API."}</p>
+                      ) : (
+                        <div className="limitRows">
+                          {provider.windows.map((quota) => {
+                            const tone = limitTone(quota);
+                            const share = quota.usedFraction === null
+                              ? 0
+                              : Math.min(100, Math.max(0, quota.usedFraction * 100));
+                            return (
+                              <div className="limitRow" key={quota.id}>
+                                <div className="limitRowTop">
+                                  <span>{quota.label}</span>
+                                  <strong className={tone}>
+                                    {formatLimitAmount(quota.used, quota.unit)}
+                                    {quota.limit === null ? "" : ` / ${formatLimitAmount(quota.limit, quota.unit)}`}
+                                  </strong>
+                                </div>
+                                <div className="limitTrack">
+                                  <div className={`limitFill ${tone}`} style={{ width: `${share}%` }} />
+                                </div>
+                                <small>
+                                  {quota.remaining === null ? "" : `${formatLimitAmount(quota.remaining, quota.unit)} left`}
+                                  {quota.resetsAt === null ? "" : ` · resets ${new Date(quota.resetsAt).toLocaleString()}`}
+                                  {quota.status === "ok" ? "" : ` · ${quota.status}`}
+                                </small>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
 
           <section className="panel sectionPanel">
             <div className="panelHeading">

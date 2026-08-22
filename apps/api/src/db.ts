@@ -12,7 +12,33 @@ export interface ImportResult {
   completedAt: number;
 }
 
-export type DashboardPeriod = "today" | "month" | "all";
+// A single day is addressed by its own local calendar date, so the period is
+// either one of the three named windows or the date itself. One parameter keeps
+// the reports' echoed period a round trip of what was asked for.
+export type DayPeriod = `${number}-${number}-${number}`;
+export type DashboardPeriod = "today" | "month" | "all" | DayPeriod;
+
+const dayPattern = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+// Local midnight of a calendar date, or null when the text is not one. A date
+// the Date constructor would silently roll over — 2026-02-31 becomes March 3 —
+// is rejected instead of answered with another day's spend.
+export function parseDay(value: string): Date | null {
+  const match = dayPattern.exec(value);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const start = new Date(year, month - 1, day);
+  if (start.getFullYear() !== year || start.getMonth() !== month - 1 || start.getDate() !== day) {
+    return null;
+  }
+  return start;
+}
+
+export function isDashboardPeriod(value: string): value is DashboardPeriod {
+  return value === "today" || value === "month" || value === "all" || parseDay(value) !== null;
+}
 
 interface UsageRow {
   session_file: string;
@@ -534,19 +560,24 @@ function pricePerMillion(cost: number, tokens: number): number | null {
 function usageRange(period: DashboardPeriod, now: number): { where: string; parameters: number[] } {
   if (period === "all") return { where: "", parameters: [] };
 
-  const start = new Date(now);
-  if (period === "today") {
+  let start: Date;
+  if (period === "today" || period === "month") {
+    start = new Date(now);
+    if (period === "month") start.setDate(1);
     start.setHours(0, 0, 0, 0);
   } else {
-    start.setDate(1);
-    start.setHours(0, 0, 0, 0);
+    const day = parseDay(period);
+    if (day === null) {
+      throw new Error(`period must be today, month, all, or a YYYY-MM-DD date, not ${period}`);
+    }
+    start = day;
   }
 
   const end = new Date(start);
-  if (period === "today") {
-    end.setDate(end.getDate() + 1);
-  } else {
+  if (period === "month") {
     end.setMonth(end.getMonth() + 1);
+  } else {
+    end.setDate(end.getDate() + 1);
   }
 
   return {

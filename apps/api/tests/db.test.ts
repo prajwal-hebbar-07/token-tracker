@@ -4,7 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { getDashboard, getProjects, importFromOmp, openTrackerDatabase, saveLimitsSnapshot } from "../src/db.js";
+import { getDashboard, getProjects, importFromOmp, isDashboardPeriod, openTrackerDatabase, saveLimitsSnapshot } from "../src/db.js";
 
 function writeSession(filePath: string, userText: string, entryIds: string[], cwd?: string): void {
   const lines: string[] = [];
@@ -214,7 +214,7 @@ test("imports OMP rows idempotently and applies recorded and estimated prices", 
   }
 });
 
-test("filters every dashboard aggregate to today and the current month", () => {
+test("filters every dashboard aggregate to today, a chosen day, and the current month", () => {
   const directory = mkdtempSync(join(tmpdir(), "token-tracker-"));
   const sourcePath = join(directory, "omp.sqlite");
   const trackerPath = join(directory, "tracker.sqlite");
@@ -250,6 +250,23 @@ test("filters every dashboard aggregate to today and the current month", () => {
     assert.equal(month.models[0]?.model, "claude-opus-5");
     assert.equal(month.categories.length, 1);
     assert.equal(month.categories[0]?.totalTokens, 13_300);
+
+    // The chosen day is the one entry-2 was moved to, so it must exclude both
+    // today's row and the row from the previous month.
+    const chosenDay = getDashboard(tracker, "2026-08-15", now);
+    assert.equal(chosenDay.summary.messageCount, 1);
+    assert.equal(chosenDay.summary.totalTokens, 5_200);
+    assertClose(chosenDay.summary.cost, 0.026);
+    assert.equal(chosenDay.models.length, 1);
+    assert.equal(getProjects(tracker, "2026-08-15", now).period, "2026-08-15");
+
+    // A day nothing was recorded on is empty rather than an error.
+    assert.equal(getDashboard(tracker, "2026-08-14", now).summary.messageCount, 0);
+
+    // A date the Date constructor would roll over into March is not a period.
+    assert.equal(isDashboardPeriod("2026-02-31"), false);
+    assert.equal(isDashboardPeriod("2026-8-15"), false);
+    assert.equal(isDashboardPeriod("2026-08-15"), true);
 
     const all = getDashboard(tracker, "all", now);
     assert.equal(all.summary.messageCount, 3);

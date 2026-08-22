@@ -204,7 +204,7 @@ fn api_reply(
     query: Option<&str>,
     body: Option<String>,
 ) -> Reply {
-    const BAD_PERIOD: &str = "period must be today, month, or all";
+    const BAD_PERIOD: &str = "period must be today, month, all, or a YYYY-MM-DD date";
 
     let store = match backend {
         Backend::Ready(store) => store,

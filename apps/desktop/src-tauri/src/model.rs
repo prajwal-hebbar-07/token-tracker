@@ -5,14 +5,16 @@
 //! the interface types in `apps/web/app/page.tsx` and
 //! `apps/web/app/projects/page.tsx` are the contract.
 
-use serde::{Deserialize, Serialize};
+use chrono::NaiveDate;
+use serde::{Deserialize, Serialize, Serializer};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Period {
     Today,
     Month,
     All,
+    /// One local calendar day, named by the date itself.
+    Day(NaiveDate),
 }
 
 impl Period {
@@ -23,7 +25,38 @@ impl Period {
             "today" => Some(Self::Today),
             "month" => Some(Self::Month),
             "all" => Some(Self::All),
-            _ => None,
+            date => parse_day(date).map(Self::Day),
+        }
+    }
+}
+
+/// `YYYY-MM-DD` and nothing else, matching the API's regex rather than chrono's
+/// tolerance for unpadded numbers and signed years, so both implementations
+/// accept exactly the same dates.
+fn parse_day(value: &str) -> Option<NaiveDate> {
+    let bytes = value.as_bytes();
+    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+        return None;
+    }
+    if !bytes
+        .iter()
+        .enumerate()
+        .all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit())
+    {
+        return None;
+    }
+    NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()
+}
+
+// The reports echo the period back as the string the request asked for, so a day
+// serialises as its date and never as a tagged enum variant.
+impl Serialize for Period {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Today => serializer.serialize_str("today"),
+            Self::Month => serializer.serialize_str("month"),
+            Self::All => serializer.serialize_str("all"),
+            Self::Day(date) => serializer.collect_str(&date.format("%Y-%m-%d")),
         }
     }
 }

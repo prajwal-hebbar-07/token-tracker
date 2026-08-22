@@ -13,6 +13,8 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
+  type DashboardPeriod,
+  type DayPeriod,
   getDashboard,
   getProjects,
   importFromOmp,
@@ -173,10 +175,25 @@ const snapshot: LimitsSnapshot = {
 };
 saveLimitsSnapshot(tracker, snapshot);
 
-const periods = ["today", "month", "all"] as const;
+// The two day periods are derived from the caller's clock rather than hardcoded,
+// so both sides pick the same local calendar dates in every time zone: one day
+// holding the anchored row, and one holding the row 40 days behind it.
+function localDay(millis: number): DayPeriod {
+  const date = new Date(millis);
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${String(date.getDate()).padStart(2, "0")}` as DayPeriod;
+}
+
+const periods: Array<[string, DashboardPeriod]> = [
+  ["today", "today"],
+  ["month", "month"],
+  ["all", "all"],
+  ["day", localDay(now)],
+  ["pastDay", localDay(now - 40 * day)],
+];
 const output = {
-  dashboard: Object.fromEntries(periods.map((period) => [period, getDashboard(tracker, period, now)])),
-  projects: Object.fromEntries(periods.map((period) => [period, getProjects(tracker, period, now)])),
+  dashboard: Object.fromEntries(periods.map(([name, period]) => [name, getDashboard(tracker, period, now)])),
+  projects: Object.fromEntries(periods.map(([name, period]) => [name, getProjects(tracker, period, now)])),
 };
 tracker.close();
 

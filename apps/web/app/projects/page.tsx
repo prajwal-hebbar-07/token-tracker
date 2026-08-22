@@ -3,7 +3,7 @@
 import { type CSSProperties, useCallback, useEffect, useState } from "react";
 import { compactNumber, fullNumber, hiddenModels, money, priceLabel, requestJson } from "../lib";
 import { AppNav } from "../nav";
-import { type Period, PeriodTabs, usePeriod } from "../period";
+import { type Period, PeriodTabs, periodEyebrow, periodLabel, usePeriod } from "../period";
 
 interface ProjectsReport {
   generatedAt: number;
@@ -45,12 +45,6 @@ interface ProjectsReport {
     }>;
   }>;
 }
-
-const eyebrows: Record<Period, string> = {
-  today: "TODAY'S SPEND BY PROJECT",
-  month: "CURRENT MONTH SPEND BY PROJECT",
-  all: "ALL-TIME SPEND BY PROJECT",
-};
 
 function isProjectsReport(value: unknown): value is ProjectsReport {
   if (!value || typeof value !== "object") return false;
@@ -166,14 +160,14 @@ export default function ProjectsPage() {
       ) : projects.length === 0 ? (
         <section className="emptyState">
           <p className="emptyKicker">NO PROJECTS THIS PERIOD</p>
-          <h2>No project recorded usage for {period === "today" ? "today" : period === "month" ? "this month" : "all time"}.</h2>
+          <h2>No project recorded usage for {periodLabel(period)}.</h2>
           <p>A project is the working directory Oh My Pi recorded for each session.</p>
         </section>
       ) : (
         <>
           <section className="hero">
             <div>
-              <p className="eyebrow">{eyebrows[period]}</p>
+              <p className="eyebrow">{periodEyebrow(period)} BY PROJECT</p>
               <div className="totalSpend">{money.format(report.totals.cost)}</div>
               <p className="range">
                 {fullNumber.format(report.totals.projectCount)} projects ·{" "}

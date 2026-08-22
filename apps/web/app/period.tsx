@@ -1,14 +1,46 @@
 "use client";
 
 import { createContext, type ReactNode, useContext, useState } from "react";
+import { DayPicker, dayDate, type IsoDay } from "./day-picker";
 
-export type Period = "today" | "month" | "all";
+// A single day is addressed by its own local calendar date, which is exactly what
+// the API takes as the period, so the picker needs no second query parameter.
+export type DayPeriod = IsoDay;
+export type Period = "today" | "month" | "all" | DayPeriod;
+
+const dayPattern = /^\d{4}-\d{2}-\d{2}$/;
 
 const options: Array<{ value: Period; label: string }> = [
   { value: "today", label: "Today" },
   { value: "month", label: "This month" },
   { value: "all", label: "All time" },
 ];
+
+export function isDay(period: Period): period is DayPeriod {
+  return dayPattern.test(period);
+}
+
+export function dayLabel(period: DayPeriod): string {
+  return dayDate(period).toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+export function periodLabel(period: Period): string {
+  if (period === "today") return "today";
+  if (period === "month") return "this month";
+  if (period === "all") return "all time";
+  return dayLabel(period);
+}
+
+export function periodEyebrow(period: Period): string {
+  if (period === "today") return "TODAY'S SPEND";
+  if (period === "month") return "CURRENT MONTH SPEND";
+  if (period === "all") return "ALL-TIME SPEND";
+  return `SPEND ON ${dayLabel(period).toUpperCase()}`;
+}
 
 interface PeriodState {
   period: Period;
@@ -50,6 +82,7 @@ export function PeriodTabs({ disabled = false }: Readonly<{ disabled?: boolean }
           {option.label}
         </button>
       ))}
+      <DayPicker disabled={disabled} onSelect={setPeriod} selected={isDay(period) ? period : null} />
     </div>
   );
 }

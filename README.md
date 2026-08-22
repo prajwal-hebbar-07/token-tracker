@@ -78,6 +78,19 @@ model's share of total spend, the number inside it is the blended price actually
 paid per million tokens, and the bar underneath compares that price against the
 priciest model in use.
 
+Every figure is scoped by the period control beside the navigation: today, the
+current month, all time, or one specific day. The fourth tab is that day: it
+opens a calendar drawn by the app itself rather than the browser's own date
+input, so it matches the dashboard and needs one click per choice. Clicking that
+tab only opens the calendar — the report changes when a day is picked in it, and
+anything clicked outside closes it again. Days that have not happened cannot be
+picked, and neither can the months after this one.
+A picked day is read back from this app's own database as its local
+midnight-to-midnight window, so any day since the first import can be reviewed
+without re-running `omp`. The **Account limits** panel disappears while a day is
+selected: quotas are a single live reading from each provider, so they would say
+nothing about a day that has already passed.
+
 The **Projects** tab is a page of its own reached from the top navigation. A
 project is the working directory Oh My Pi recorded for each session, so the page
 needs no extra bookkeeping. Every project is one card carrying its total spend,

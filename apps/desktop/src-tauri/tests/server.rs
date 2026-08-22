@@ -130,19 +130,23 @@ fn serves_the_dashboard_and_the_api_from_one_origin() {
     assert_eq!(dashboard["lastSync"], Value::Null);
     assert_eq!(dashboard["limits"], Value::Null);
 
-    for period in ["today", "month", "all"] {
+    for period in ["today", "month", "all", "2026-08-15"] {
         let (status, report) = client.json(&format!("/api/projects?period={period}"));
         assert_eq!(status, 200, "the projects route failed for {period}");
         assert_eq!(report["period"], Value::from(period));
         assert_eq!(report["totals"]["projectCount"], Value::from(0));
     }
 
-    let (status, rejected) = client.json("/api/dashboard?period=quarter");
-    assert_eq!(status, 400, "an unknown period should be rejected");
-    assert_eq!(
-        rejected["error"],
-        Value::from("period must be today, month, or all")
-    );
+    // A date the calendar does not have is a client error, not another day's
+    // spend: 2026 has no 31st of February.
+    for period in ["quarter", "2026-02-31", "2026-8-15"] {
+        let (status, rejected) = client.json(&format!("/api/dashboard?period={period}"));
+        assert_eq!(status, 400, "{period} should be rejected");
+        assert_eq!(
+            rejected["error"],
+            Value::from("period must be today, month, all, or a YYYY-MM-DD date")
+        );
+    }
 
     // Unknown API paths must stay JSON: the client parses every response body
     // before it looks at the status.

@@ -221,22 +221,21 @@ fn local_midnight(date: NaiveDate) -> i64 {
 /// Half-open period bounds in local time, matching the original's use of
 /// Date#setHours and Date#setMonth rather than UTC arithmetic.
 fn usage_range(period: Period, now: i64) -> (&'static str, Vec<i64>) {
-    if period == Period::All {
-        return ("", Vec::new());
-    }
-
-    let Some(instant) = DateTime::from_timestamp_millis(now) else {
-        return ("", Vec::new());
-    };
-    let today = instant.with_timezone(&Local).date_naive();
-
     let (start_date, end_date) = match period {
-        Period::Today => (today, today.checked_add_days(Days::new(1))),
-        Period::Month => {
-            let first = today.with_day(1).unwrap_or(today);
-            (first, first.checked_add_months(Months::new(1)))
+        Period::All => return ("", Vec::new()),
+        Period::Day(date) => (date, date.checked_add_days(Days::new(1))),
+        Period::Today | Period::Month => {
+            let Some(instant) = DateTime::from_timestamp_millis(now) else {
+                return ("", Vec::new());
+            };
+            let today = instant.with_timezone(&Local).date_naive();
+            if period == Period::Month {
+                let first = today.with_day(1).unwrap_or(today);
+                (first, first.checked_add_months(Months::new(1)))
+            } else {
+                (today, today.checked_add_days(Days::new(1)))
+            }
         }
-        Period::All => unreachable!("handled above"),
     };
     let Some(end_date) = end_date else {
         return ("", Vec::new());
