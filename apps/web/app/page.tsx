@@ -95,6 +95,151 @@ function limitTone(quota: { status: string; usedFraction: number | null }): stri
   return used >= 0.7 ? "warn" : "safe";
 }
 
+type ImportStage = "sessions" | "usage" | "limits";
+type StageStatus = { state: "idle" | "loading" | "done" | "error"; message: string | null };
+
+const STAGE_ORDER: ImportStage[] = ["sessions", "usage", "limits"];
+const STAGE_LABEL: Record<ImportStage, string> = {
+  sessions: "Sync Oh My Pi sessions",
+  usage: "Import usage",
+  limits: "Read provider limits",
+};
+
+function HeroSkeleton() {
+  return (
+    <section className="hero">
+      <div className="heroSkeleton">
+        <div className="skeleton skeletonText" style={{ width: 110, marginBottom: 10 }} />
+        <div className="skeleton skeletonBig" style={{ width: 280, height: 72, marginBottom: 14 }} />
+        <div className="skeleton skeletonText" style={{ width: 180 }} />
+      </div>
+      <div className="skeleton heroNoteSkeleton" />
+    </section>
+  );
+}
+
+function StatGridSkeleton() {
+  return (
+    <section className="statGrid" aria-label="Usage summary">
+      {[1, 2, 3, 4].map((i) => (
+        <article className="statCard" key={i}>
+          <div className="skeleton skeletonText" style={{ width: "70%" }} />
+          <div className="skeleton skeletonNumber" style={{ width: "55%", marginTop: 8 }} />
+          <div className="skeleton skeletonText" style={{ width: "80%", marginTop: 6 }} />
+        </article>
+      ))}
+    </section>
+  );
+}
+
+function CategoryGridSkeleton() {
+  return (
+    <section className="panel sectionPanel">
+      <div className="panelHeading">
+        <div>
+          <div className="skeleton skeletonText" style={{ width: 120, marginBottom: 8 }} />
+          <div className="skeleton skeletonText" style={{ width: 220, height: 18 }} />
+        </div>
+        <div className="skeleton skeletonText" style={{ width: 160 }} />
+      </div>
+      <div className="categoryGrid">
+        {[1, 2, 3, 4].map((i) => (
+          <article className="categoryCard" key={i}>
+            <div className="categoryCardTop">
+              <div className="skeleton skeletonText" style={{ width: 28 }} />
+              <div className="skeleton skeletonText" style={{ width: 44 }} />
+            </div>
+            <div className="skeleton skeletonText" style={{ width: "75%", marginTop: 12 }} />
+            <div className="skeleton skeletonText" style={{ width: "60%", marginTop: 8 }} />
+            <div className="categoryTrack" aria-hidden="true">
+              <div className="skeleton" style={{ width: "50%", height: 6, borderRadius: 3 }} />
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function LimitsSkeleton() {
+  return (
+    <section className="panel sectionPanel" aria-label="Provider limits">
+      <div className="panelHeading">
+        <div>
+          <div className="skeleton skeletonText" style={{ width: 110, marginBottom: 8 }} />
+          <div className="skeleton skeletonText" style={{ width: 140, height: 18 }} />
+        </div>
+        <div className="skeleton skeletonText" style={{ width: 160 }} />
+      </div>
+      <div className="limitGrid">
+        <article className="limitCard">
+          <div className="limitCardTop">
+            <div className="skeleton skeletonText" style={{ width: 90 }} />
+            <div className="skeleton skeletonText" style={{ width: 60 }} />
+          </div>
+          <div className="skeleton skeletonText" style={{ width: 110, marginTop: 4 }} />
+          <div className="limitRows">
+            {[1, 2].map((i) => (
+              <div className="limitRow" key={i}>
+                <div className="limitRowTop">
+                  <div className="skeleton skeletonText" style={{ width: 100 }} />
+                  <div className="skeleton skeletonText" style={{ width: 80 }} />
+                </div>
+                <div className="limitTrack">
+                  <div className="skeleton" style={{ width: "40%", height: 6, borderRadius: 3 }} />
+                </div>
+                <div className="skeleton skeletonText" style={{ width: 120, marginTop: 4 }} />
+              </div>
+            ))}
+          </div>
+        </article>
+      </div>
+    </section>
+  );
+}
+
+function ModelDeckSkeleton() {
+  return (
+    <section className="panel sectionPanel">
+      <div className="panelHeading">
+        <div>
+          <div className="skeleton skeletonText" style={{ width: 120, marginBottom: 8 }} />
+          <div className="skeleton skeletonText" style={{ width: 200, height: 18 }} />
+        </div>
+        <div className="skeleton skeletonText" style={{ width: 200 }} />
+      </div>
+      <div className="modelDeck">
+        {[1, 2, 3, 4].map((i) => (
+          <article className="modelCard" key={i}>
+            <div className="modelCardTop">
+              <div className="skeleton skeletonText" style={{ width: 28 }} />
+            </div>
+            <div className="skeleton modelRingSkeleton" />
+            <div className="skeleton skeletonText" style={{ width: "70%", marginTop: 14 }} />
+            <div className="skeleton skeletonText" style={{ width: "50%", marginTop: 6 }} />
+            <div className="skeleton skeletonText" style={{ width: "45%", marginTop: 14 }} />
+            <div className="priceMeter" aria-hidden="true">
+              <div className="skeleton" style={{ width: "60%", height: 6, borderRadius: 3 }} />
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function DashboardSkeleton() {
+  return (
+    <>
+      <HeroSkeleton />
+      <StatGridSkeleton />
+      <CategoryGridSkeleton />
+      <LimitsSkeleton />
+      <ModelDeckSkeleton />
+    </>
+  );
+}
+
 // The window is created once per app launch, so this module is evaluated once
 // per launch too: the flag makes the automatic import fire on opening the app
 // and never again, not even when the page segment remounts after navigating to
@@ -110,6 +255,24 @@ export default function DashboardPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const { hidden, setKeysHidden, showEvery } = useHiddenLimits();
+
+  const [stages, setStages] = useState<Record<ImportStage, StageStatus>>({
+    sessions: { state: "idle", message: null },
+    usage: { state: "idle", message: null },
+    limits: { state: "idle", message: null },
+  });
+
+  const resetStages = useCallback(() => {
+    setStages({
+      sessions: { state: "idle", message: null },
+      usage: { state: "idle", message: null },
+      limits: { state: "idle", message: null },
+    });
+  }, []);
+
+  const setStage = useCallback((stage: ImportStage, status: StageStatus) => {
+    setStages((current) => ({ ...current, [stage]: status }));
+  }, []);
 
   const loadDashboard = useCallback(async (): Promise<Dashboard> => {
     const payload = await requestJson(`/api/dashboard?period=${period}`);
@@ -142,18 +305,38 @@ export default function DashboardPage() {
     setError(null);
     setNotice(null);
     setWarnings([]);
+    resetStages();
+    let accumulatedWarnings: string[] = [];
+    let failedStage: ImportStage | null = null;
     try {
-      const payload = await requestJson("/api/import", { method: "POST" });
-      setDashboard(await loadDashboard());
-      const syncWarnings = importWarnings(payload);
-      setWarnings(syncWarnings);
-      if (syncWarnings.length === 0) setNotice("Oh My Pi sessions synced, limits refreshed, usage imported.");
+      for (const stage of STAGE_ORDER) {
+        failedStage = stage;
+        setStage(stage, { state: "loading", message: null });
+        const payload = await requestJson(`/api/import?stage=${stage}`, { method: "POST" });
+        const stageWarnings = importWarnings(payload);
+        accumulatedWarnings.push(...stageWarnings);
+        setStage(stage, { state: "done", message: null });
+        // Refresh the dashboard as soon as usage or limits land so the numbers
+        // appear incrementally instead of waiting for the whole pipeline.
+        if (stage === "usage" || stage === "limits") {
+          setDashboard(await loadDashboard());
+        }
+      }
+      failedStage = null;
+      setWarnings(accumulatedWarnings);
+      if (accumulatedWarnings.length === 0) {
+        setNotice("Oh My Pi sessions synced, limits refreshed, usage imported.");
+      }
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not import Oh My Pi usage");
+      const message = reason instanceof Error ? reason.message : "Could not import Oh My Pi usage";
+      if (failedStage !== null) {
+        setStage(failedStage, { state: "error", message });
+      }
+      setError(message);
     } finally {
       setImporting(false);
     }
-  }, [loadDashboard]);
+  }, [loadDashboard, resetStages, setStage]);
 
   // Opening the app imports once on its own, so what is on screen is what Oh My
   // Pi has recorded without the button having to be pressed. Every later refresh
@@ -182,6 +365,10 @@ export default function DashboardPage() {
   const cheapest = prices.length === 0 ? 0 : Math.min(...prices);
   // Extremes are only worth calling out when there is something to compare against.
   const rankable = prices.length > 1 && priciest > cheapest;
+
+  const usageReady = !importing || stages.usage.state === "done";
+  const limitsReady = !importing || stages.limits.state === "done";
+  const showSkeletonDashboard = importing && !usageReady;
 
   return (
     <main className="shell">
@@ -213,12 +400,22 @@ export default function DashboardPage() {
 
       {error && <div className="alert errorAlert">{error}</div>}
       {notice && <div className="alert successAlert">{notice}</div>}
+      {importing && (
+        <div className="fetchStatus" aria-live="polite" aria-busy="true">
+          <span className="spinner" />
+          <span>
+            {STAGE_LABEL[STAGE_ORDER.find((stage) => stages[stage].state === "loading") ?? "sessions"]}…
+          </span>
+        </div>
+      )}
       {warnings.map((entry) => (
         <div className="alert warningAlert" key={entry}>{entry}</div>
       ))}
 
       {loading ? (
         <section className="emptyState"><div className="spinner" /><p>Loading saved usage…</p></section>
+      ) : showSkeletonDashboard ? (
+        <DashboardSkeleton />
       ) : !dashboard ? (
         <section className="emptyState">
           <p className="emptyKicker">USAGE UNAVAILABLE</p>
@@ -309,70 +506,74 @@ export default function DashboardPage() {
           {/* Quotas are a single live reading from each provider, so they say nothing
               about a day that has already passed. */}
           {!isDay(period) && (
-            <section className="panel sectionPanel" aria-label="Provider limits">
-              <div className="panelHeading">
-                <div><p className="eyebrow">PROVIDER QUOTAS</p><h2>Account limits</h2></div>
-                <div className="panelHeadingSide">
-                  <span>{limits ? `Read ${new Date(limits.capturedAt).toLocaleString()}` : "Not read yet"}</span>
-                  {limits && limits.providers.length > 0 && (
-                    <LimitFilter
-                      providers={limits.providers}
-                      hidden={hidden}
-                      setKeysHidden={setKeysHidden}
-                      showEvery={showEvery}
-                    />
-                  )}
+            limitsReady ? (
+              <section className="panel sectionPanel" aria-label="Provider limits">
+                <div className="panelHeading">
+                  <div><p className="eyebrow">PROVIDER QUOTAS</p><h2>Account limits</h2></div>
+                  <div className="panelHeadingSide">
+                    <span>{limits ? `Read ${new Date(limits.capturedAt).toLocaleString()}` : "Not read yet"}</span>
+                    {limits && limits.providers.length > 0 && (
+                      <LimitFilter
+                        providers={limits.providers}
+                        hidden={hidden}
+                        setKeysHidden={setKeysHidden}
+                        showEvery={showEvery}
+                      />
+                    )}
+                  </div>
                 </div>
-              </div>
-              {!limits || limits.providers.length === 0 ? (
-                <p className="limitNote">No authenticated accounts reported limits. Fetch reads <code>omp usage --json</code>.</p>
-              ) : visibleProviders.length === 0 ? (
-                <p className="limitNote">Every quota is hidden. Use <em>Visible limits</em> above to bring some back.</p>
-              ) : (
-                <div className="limitGrid">
-                  {visibleProviders.map((provider) => (
-                    <article className="limitCard" key={`${provider.provider}/${provider.account ?? "default"}`}>
-                      <div className="limitCardTop">
-                        <strong>{provider.provider}</strong>
-                        {provider.plan && <span className="limitPlan">{provider.plan}</span>}
-                      </div>
-                      <small>{provider.account ?? "single account"}</small>
-                      {provider.windows.length === 0 ? (
-                        <p className="limitNote">{provider.notes[0] ?? "This provider exposes no quota API."}</p>
-                      ) : (
-                        <div className="limitRows">
-                          {provider.windows.map((quota) => {
-                            const tone = limitTone(quota);
-                            const share = quota.usedFraction === null
-                              ? 0
-                              : Math.min(100, Math.max(0, quota.usedFraction * 100));
-                            return (
-                              <div className="limitRow" key={quota.id}>
-                                <div className="limitRowTop">
-                                  <span>{quota.label}</span>
-                                  <strong className={tone}>
-                                    {formatLimitAmount(quota.used, quota.unit)}
-                                    {quota.limit === null ? "" : ` / ${formatLimitAmount(quota.limit, quota.unit)}`}
-                                  </strong>
-                                </div>
-                                <div className="limitTrack">
-                                  <div className={`limitFill ${tone}`} style={{ width: `${share}%` }} />
-                                </div>
-                                <small>
-                                  {quota.remaining === null ? "" : `${formatLimitAmount(quota.remaining, quota.unit)} left`}
-                                  {quota.resetsAt === null ? "" : ` · resets ${new Date(quota.resetsAt).toLocaleString()}`}
-                                  {quota.status === "ok" ? "" : ` · ${quota.status}`}
-                                </small>
-                              </div>
-                            );
-                          })}
+                {!limits || limits.providers.length === 0 ? (
+                  <p className="limitNote">No authenticated accounts reported limits. Fetch reads <code>omp usage --json</code>.</p>
+                ) : visibleProviders.length === 0 ? (
+                  <p className="limitNote">Every quota is hidden. Use <em>Visible limits</em> above to bring some back.</p>
+                ) : (
+                  <div className="limitGrid">
+                    {visibleProviders.map((provider) => (
+                      <article className="limitCard" key={`${provider.provider}/${provider.account ?? "default"}`}>
+                        <div className="limitCardTop">
+                          <strong>{provider.provider}</strong>
+                          {provider.plan && <span className="limitPlan">{provider.plan}</span>}
                         </div>
-                      )}
-                    </article>
-                  ))}
-                </div>
-              )}
-            </section>
+                        <small>{provider.account ?? "single account"}</small>
+                        {provider.windows.length === 0 ? (
+                          <p className="limitNote">{provider.notes[0] ?? "This provider exposes no quota API."}</p>
+                        ) : (
+                          <div className="limitRows">
+                            {provider.windows.map((quota) => {
+                              const tone = limitTone(quota);
+                              const share = quota.usedFraction === null
+                                ? 0
+                                : Math.min(100, Math.max(0, quota.usedFraction * 100));
+                              return (
+                                <div className="limitRow" key={quota.id}>
+                                  <div className="limitRowTop">
+                                    <span>{quota.label}</span>
+                                    <strong className={tone}>
+                                      {formatLimitAmount(quota.used, quota.unit)}
+                                      {quota.limit === null ? "" : ` / ${formatLimitAmount(quota.limit, quota.unit)}`}
+                                    </strong>
+                                  </div>
+                                  <div className="limitTrack">
+                                    <div className={`limitFill ${tone}`} style={{ width: `${share}%` }} />
+                                  </div>
+                                  <small>
+                                    {quota.remaining === null ? "" : `${formatLimitAmount(quota.remaining, quota.unit)} left`}
+                                    {quota.resetsAt === null ? "" : ` · resets ${new Date(quota.resetsAt).toLocaleString()}`}
+                                    {quota.status === "ok" ? "" : ` · ${quota.status}`}
+                                  </small>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
+            ) : (
+              <LimitsSkeleton />
+            )
           )}
 
           <section className="panel sectionPanel">

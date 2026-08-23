@@ -122,6 +122,11 @@ insert.run(10, session2, "entry-10", "workspace-beta", "gpt-test", "openai", "re
 insert.run(11, session7, "entry-11", "workspace-delta", "kimi-k2.6", "ollama-cloud", "ollama", 1_700_300_250_000, 92, 46, "stop", null, 600_000, 10_000, 50_000, 0, 660_000, 0, 0, 0, 0, 0, 0, "task", 0);
 // Kimi K3 uses its own flat Moonshot rates, not the K2.6 ones.
 insert.run(12, session7, "entry-12", "workspace-delta", "kimi-k3", "ollama-cloud", "ollama", 1_700_300_260_000, 94, 48, "stop", null, 200_000, 20_000, 50_000, 0, 270_000, 0, 0, 0, 0, 0, 0, "task", 0);
+// GLM-5.2, Kimi K2.7 Code, and DeepSeek V4 Pro each price from their own
+// published rates, so the two implementations must agree on the split.
+insert.run(13, session7, "entry-13", "workspace-delta", "glm-5.2", "ollama-cloud", "ollama", 1_700_300_270_000, 90, 45, "stop", null, 200_000, 20_000, 50_000, 0, 270_000, 0, 0, 0, 0, 0, 0, "task", 0);
+insert.run(14, session7, "entry-14", "workspace-delta", "kimi-k2.7-code", "ollama-cloud", "ollama", 1_700_300_280_000, 90, 45, "stop", null, 200_000, 20_000, 50_000, 0, 270_000, 0, 0, 0, 0, 0, 0, "task", 0);
+insert.run(15, session7, "entry-15", "workspace-delta", "deepseek-v4-pro", "ollama-cloud", "ollama", 1_700_300_290_000, 90, 45, "stop", null, 200_000, 20_000, 50_000, 0, 270_000, 0, 0, 0, 0, 0, 0, "task", 0);
 source.close();
 
 const tracker = openTrackerDatabase(join(directory, "tracker-ts.sqlite"));

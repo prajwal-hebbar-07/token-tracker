@@ -224,6 +224,56 @@ test("imports OMP rows idempotently and applies recorded and estimated prices", 
     assertClose(kimiK3.cost_cache_write, 0);
     assertClose(kimiK3.cost_total, 0.915);
     assertClose(kimiK3.cost_no_cache_input, 0.75);
+
+    // GLM-5.2, Kimi K2.7 Code, and DeepSeek V4 Pro are also billed free on
+    // Ollama Cloud, so each must be priced from its own published rates.
+    insertKimi.run(9, join(directory, "session-7.jsonl"), "entry-9", "workspace-epsilon", "glm-5.2", "ollama-cloud", "ollama", 1_700_604_800_000, 90, 45, "stop", null, 200_000, 20_000, 50_000, 0, 270_000, 0, 0, 0, 0, 0, 0, "task", 0);
+    insertKimi.run(10, join(directory, "session-8.jsonl"), "entry-10", "workspace-epsilon", "kimi-k2.7-code", "ollama-cloud", "ollama", 1_700_691_200_000, 90, 45, "stop", null, 200_000, 20_000, 50_000, 0, 270_000, 0, 0, 0, 0, 0, 0, "task", 0);
+    insertKimi.run(11, join(directory, "session-9.jsonl"), "entry-11", "workspace-epsilon", "deepseek-v4-pro", "ollama-cloud", "ollama", 1_700_777_600_000, 90, 45, "stop", null, 200_000, 20_000, 50_000, 0, 270_000, 0, 0, 0, 0, 0, 0, "task", 0);
+    const newModelsImport = importFromOmp(tracker, sourcePath);
+    assert.equal(newModelsImport.newRecords, 3);
+
+    const glm = tracker.prepare(`
+      SELECT cost_input, cost_output, cost_cache_read, cost_cache_write,
+             cost_total, cost_no_cache_input
+      FROM usage_messages
+      WHERE entry_id = 'entry-9'
+    `).get();
+    assert.ok(glm);
+    assertClose(glm.cost_input, 0.28);
+    assertClose(glm.cost_output, 0.088);
+    assertClose(glm.cost_cache_read, 0.013);
+    assertClose(glm.cost_cache_write, 0);
+    assertClose(glm.cost_total, 0.381);
+    assertClose(glm.cost_no_cache_input, 0.35);
+
+    const kimiCode = tracker.prepare(`
+      SELECT cost_input, cost_output, cost_cache_read, cost_cache_write,
+             cost_total, cost_no_cache_input
+      FROM usage_messages
+      WHERE entry_id = 'entry-10'
+    `).get();
+    assert.ok(kimiCode);
+    assertClose(kimiCode.cost_input, 0.19);
+    assertClose(kimiCode.cost_output, 0.08);
+    assertClose(kimiCode.cost_cache_read, 0.0095);
+    assertClose(kimiCode.cost_cache_write, 0);
+    assertClose(kimiCode.cost_total, 0.2795);
+    assertClose(kimiCode.cost_no_cache_input, 0.2375);
+
+    const deepseek = tracker.prepare(`
+      SELECT cost_input, cost_output, cost_cache_read, cost_cache_write,
+             cost_total, cost_no_cache_input
+      FROM usage_messages
+      WHERE entry_id = 'entry-11'
+    `).get();
+    assert.ok(deepseek);
+    assertClose(deepseek.cost_input, 0.132);
+    assertClose(deepseek.cost_output, 0.0396);
+    assertClose(deepseek.cost_cache_read, 0.0011);
+    assertClose(deepseek.cost_cache_write, 0);
+    assertClose(deepseek.cost_total, 0.1727);
+    assertClose(deepseek.cost_no_cache_input, 0.165);
   } finally {
     source.close();
     tracker.close();

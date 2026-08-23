@@ -55,22 +55,43 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "POST" && url.pathname === "/api/import") {
-      const warnings: string[] = [];
-      const syncWarning = syncOmpSessions();
-      if (syncWarning) warnings.push(syncWarning);
-
-      let result: ImportResult;
-      try {
-        result = importFromOmp(tracker);
-      } catch (error) {
-        if (!syncWarning) throw error;
-        const message = error instanceof Error ? error.message : "Import failed";
-        throw new Error(`${message} (session sync also failed: ${syncWarning})`);
+      const stage = url.searchParams.get("stage");
+      const validStages = ["sessions", "usage", "limits"];
+      if (stage !== null && !validStages.includes(stage)) {
+        sendJson(response, 400, { error: "stage must be sessions, usage, or limits" });
+        return;
       }
 
-      const limits = await readProviderLimits();
-      if (limits.warning) warnings.push(limits.warning);
-      if (limits.snapshot) saveLimitsSnapshot(tracker, limits.snapshot);
+      const warnings: string[] = [];
+      let result: ImportResult | undefined;
+
+      if (stage === null || stage === "sessions") {
+        const syncWarning = syncOmpSessions();
+        if (syncWarning) warnings.push(syncWarning);
+      }
+
+      if (stage === null || stage === "usage") {
+        try {
+          result = importFromOmp(tracker);
+        } catch (error) {
+          if (stage !== null) {
+            const message = error instanceof Error ? error.message : "Import failed";
+            throw new Error(message);
+          }
+          // In the full-run path, preserve the original behavior of including the
+          // session-sync warning when the usage import fails.
+          const syncWarning = warnings[0];
+          if (!syncWarning) throw error;
+          const message = error instanceof Error ? error.message : "Import failed";
+          throw new Error(`${message} (session sync also failed: ${syncWarning})`);
+        }
+      }
+
+      if (stage === null || stage === "limits") {
+        const limits = await readProviderLimits();
+        if (limits.warning) warnings.push(limits.warning);
+        if (limits.snapshot) saveLimitsSnapshot(tracker, limits.snapshot);
+      }
 
       sendJson(response, 200, { result, warnings, dashboard: getDashboard(tracker) });
       return;

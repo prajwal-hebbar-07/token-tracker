@@ -176,6 +176,70 @@ h2 {
   background: rgba(61, 78, 28, 0.25);
 }
 
+.fetchStatus {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  color: var(--muted);
+  background: var(--panel);
+  font-size: 12px;
+}
+
+.fetchStatus .spinner {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.skeleton {
+  background: var(--line);
+  border-radius: 6px;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.skeletonText {
+  height: 13px;
+}
+
+.skeletonNumber {
+  height: 24px;
+}
+
+.skeletonBig {
+  height: 52px;
+  border-radius: 8px;
+}
+
+.heroSkeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  max-width: 460px;
+}
+
+.heroNoteSkeleton {
+  width: min(460px, 100%);
+  height: 90px;
+  border-radius: 10px;
+}
+
+.modelRingSkeleton {
+  width: 110px;
+  height: 110px;
+  margin: 10px auto 0;
+  border-radius: 50%;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.42; }
+}
+
 .warningAlert {
   border-color: rgba(251, 191, 36, 0.35);
   color: #fde8b0;

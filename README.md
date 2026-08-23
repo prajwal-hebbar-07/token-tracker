@@ -73,7 +73,14 @@ input tokens, with those rates doubling for longer inputs.
 output, and $0.16 cache-read per million tokens, flat at every prompt length.
 [Kimi K3](https://platform.kimi.ai/docs/pricing/chat-k3): $3.00 input, $15.00
 output, and $0.30 cache-read per million tokens, likewise flat.
-Passive cache writes have no added fee under either.
+[Kimi K2.7 Code](https://platform.kimi.ai/docs/pricing/chat-k27-code): $0.95
+input, $4.00 output, and $0.19 cache-read per million tokens, flat.
+[GLM-5.2](https://docs.z.ai/guides/overview/pricing): $1.40 input, $4.40
+output, and $0.26 cache-read per million tokens, flat.
+[DeepSeek V4 Pro](https://api-docs.deepseek.com/quick_start/pricing): $0.66
+input, $1.98 output, and $0.022 cache-read per million tokens at the off-peak
+rate, flat; DeepSeek doubles every rate during peak hours.
+Passive cache writes have no added fee under any of them.
 
 Model spend is shown as a deck of cards rather than a table: each ring is that
 model's share of total spend, the number inside it is the blended price actually

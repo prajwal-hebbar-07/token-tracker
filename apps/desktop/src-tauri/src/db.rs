@@ -40,6 +40,12 @@ struct EstimatedPrice {
 // https://platform.kimi.ai/docs/pricing/chat-k26
 // Kimi K3 rates published 2026-08-22:
 // https://platform.kimi.ai/docs/pricing/chat-k3
+// GLM-5.2 rates published 2026-08-23:
+// https://docs.z.ai/guides/overview/pricing
+// Kimi K2.7 Code rates published 2026-06-12:
+// https://platform.kimi.ai/docs/pricing/chat-k27-code
+// DeepSeek V4 Pro rates published 2026-08-16:
+// https://api-docs.deepseek.com/quick_start/pricing
 const ESTIMATED_PRICES: &[(&str, EstimatedPrice)] = &[
     (
         "minimax-m3",
@@ -65,6 +71,33 @@ const ESTIMATED_PRICES: &[(&str, EstimatedPrice)] = &[
             input_per_million: 3.0,
             output_per_million: 15.0,
             cache_read_per_million: 0.3,
+            tier_limit: None,
+        },
+    ),
+    (
+        "glm-5.2",
+        EstimatedPrice {
+            input_per_million: 1.4,
+            output_per_million: 4.4,
+            cache_read_per_million: 0.26,
+            tier_limit: None,
+        },
+    ),
+    (
+        "kimi-k2.7-code",
+        EstimatedPrice {
+            input_per_million: 0.95,
+            output_per_million: 4.0,
+            cache_read_per_million: 0.19,
+            tier_limit: None,
+        },
+    ),
+    (
+        "deepseek-v4-pro",
+        EstimatedPrice {
+            input_per_million: 0.66,
+            output_per_million: 1.98,
+            cache_read_per_million: 0.022,
             tier_limit: None,
         },
     ),
