@@ -1,6 +1,6 @@
 [package]
 name = "token-tracker-desktop"
-version = "1.1.0"
+version = "1.1.1"
 edition = "2021"
 description = "Token Tracker desktop application"
 publish = false
