@@ -1,6 +1,7 @@
 import { createServer, type ServerResponse } from "node:http";
 import {
   getDashboard,
+  getModels,
   getProjects,
   type ImportResult,
   importFromOmp,
@@ -41,7 +42,7 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    if (request.method === "GET" && (url.pathname === "/api/dashboard" || url.pathname === "/api/projects")) {
+    if (request.method === "GET" && (url.pathname === "/api/dashboard" || url.pathname === "/api/models" || url.pathname === "/api/projects")) {
       const period = url.searchParams.get("period") ?? "all";
       if (!isDashboardPeriod(period)) {
         sendJson(response, 400, { error: "period must be today, month, all, or a YYYY-MM-DD date" });
@@ -49,7 +50,9 @@ const server = createServer(async (request, response) => {
       }
       const payload = url.pathname === "/api/dashboard"
         ? getDashboard(tracker, period)
-        : getProjects(tracker, period);
+        : url.pathname === "/api/models"
+          ? getModels(tracker, period)
+          : getProjects(tracker, period);
       sendJson(response, 200, payload);
       return;
     }

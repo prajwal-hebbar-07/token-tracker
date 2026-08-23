@@ -126,9 +126,13 @@ fn serves_the_dashboard_and_the_api_from_one_origin() {
     assert_eq!(status, 200, "the dashboard route failed: {dashboard}");
     assert_eq!(dashboard["summary"]["messageCount"], Value::from(0));
     assert_eq!(dashboard["summary"]["cost"], Value::from(0.0));
-    assert_eq!(dashboard["models"], Value::Array(Vec::new()));
+    assert!(!dashboard.as_object().unwrap().contains_key("models"));
     assert_eq!(dashboard["lastSync"], Value::Null);
     assert_eq!(dashboard["limits"], Value::Null);
+
+    let (status, models) = client.json("/api/models");
+    assert_eq!(status, 200, "the models route failed: {models}");
+    assert_eq!(models["models"], Value::Array(Vec::new()));
 
     for period in ["today", "month", "all", "2026-08-15"] {
         let (status, report) = client.json(&format!("/api/projects?period={period}"));
@@ -140,12 +144,14 @@ fn serves_the_dashboard_and_the_api_from_one_origin() {
     // A date the calendar does not have is a client error, not another day's
     // spend: 2026 has no 31st of February.
     for period in ["quarter", "2026-02-31", "2026-8-15"] {
-        let (status, rejected) = client.json(&format!("/api/dashboard?period={period}"));
-        assert_eq!(status, 400, "{period} should be rejected");
-        assert_eq!(
-            rejected["error"],
-            Value::from("period must be today, month, all, or a YYYY-MM-DD date")
-        );
+        for path in ["/api/dashboard", "/api/models"] {
+            let (status, rejected) = client.json(&format!("{path}?period={period}"));
+            assert_eq!(status, 400, "{period} should be rejected on {path}");
+            assert_eq!(
+                rejected["error"],
+                Value::from("period must be today, month, all, or a YYYY-MM-DD date")
+            );
+        }
     }
 
     // Unknown API paths must stay JSON: the client parses every response body

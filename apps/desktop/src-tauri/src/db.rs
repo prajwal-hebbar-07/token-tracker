@@ -17,7 +17,7 @@ use rusqlite::types::ValueRef;
 use rusqlite::{params, Connection, OpenFlags};
 
 use crate::model::{
-    CategorySpend, Dashboard, ImportResult, LastSync, LimitsSnapshot, ModelSpend, Period,
+    CategorySpend, Dashboard, ImportResult, LastSync, LimitsSnapshot, ModelSpend, ModelsReport, Period,
     Preferences, Project, ProjectModel, ProjectModelTotal, ProjectTotals, ProjectsReport, Summary,
 };
 use crate::session::{classify_entry, read_session_file, SessionFile, DEFAULT_CATEGORY};
@@ -488,6 +488,24 @@ impl Store {
         Ok(loose_i64(row.get_ref(0)?))
     }
 
+    fn read_existing_rows(
+        &self,
+    ) -> Result<HashMap<(String, String), (String, Option<String>)>> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT session_file, entry_id, category, project_path FROM usage_messages")?;
+        let mut rows = statement.query([])?;
+        let mut map: HashMap<(String, String), (String, Option<String>)> = HashMap::new();
+        while let Some(row) = rows.next()? {
+            let session_file = loose_text(row.get_ref(0)?);
+            let entry_id = loose_text(row.get_ref(1)?);
+            let category = loose_text(row.get_ref(2)?);
+            let project_path = loose_opt_text(row.get_ref(3)?);
+            map.insert((session_file, entry_id), (category, project_path));
+        }
+        Ok(map)
+    }
+
     fn read_source_rows(&self, source_path: &Path) -> Result<Vec<SourceRow>> {
         let source = Connection::open_with_flags(
             source_path,
@@ -542,12 +560,24 @@ impl Store {
         let started_at = now_millis();
         let mut rows = self.read_source_rows(source_path)?;
 
+        // Session-file parsing is the slow part of a large import. Rows that
+        // are already stored keep their derived category and project path, so
+        // only new rows pay the cost of reading their transcript and classifying
+        // it.
+        let existing_by_key = self.read_existing_rows()?;
+
         let mut session_files: HashMap<String, SessionFile> = HashMap::new();
         // Subagent transcripts carry no session header, so the working directory
         // is resolved per folder: any session that recorded one speaks for the
         // slug.
         let mut path_by_folder: HashMap<String, String> = HashMap::new();
         for row in &mut rows {
+            let key = (row.session_file.clone(), row.entry_id.clone());
+            if let Some((category, project_path)) = existing_by_key.get(&key) {
+                row.category = category.clone();
+                row.project_path = project_path.clone();
+                continue;
+            }
             let session = session_files
                 .entry(row.session_file.clone())
                 .or_insert_with(|| read_session_file(&row.session_file));
@@ -559,7 +589,9 @@ impl Store {
             }
         }
         for row in &mut rows {
-            row.project_path = path_by_folder.get(&row.folder).cloned();
+            if row.project_path.is_none() {
+                row.project_path = path_by_folder.get(&row.folder).cloned();
+            }
         }
 
         let before = self.count_usage_messages()?;
@@ -772,6 +804,48 @@ impl Store {
         Ok(())
     }
 
+    pub fn models(
+        &self,
+        period: Period,
+        now: i64,
+    ) -> Result<ModelsReport> {
+        let (where_clause, parameters) = usage_range(period, now);
+        let bound: Vec<&dyn rusqlite::ToSql> = parameters
+            .iter()
+            .map(|value| value as &dyn rusqlite::ToSql)
+            .collect();
+
+        let mut statement = self.connection.prepare(&format!(
+            r#"
+    SELECT
+      model,
+      provider,
+      SUM(cost_total) AS cost,
+      SUM(total_tokens) AS totalTokens
+    FROM usage_messages
+    {where_clause}
+    GROUP BY model, provider
+    ORDER BY cost DESC, totalTokens DESC
+            "#
+        ))?;
+        let mut rows = statement.query(bound.as_slice())?;
+        let mut models: Vec<ModelSpend> = Vec::new();
+        while let Some(row) = rows.next()? {
+            let cost = loose_f64(row.get_ref(2)?);
+            let total_tokens = loose_i64(row.get_ref(3)?);
+            models.push(ModelSpend {
+                model: loose_text(row.get_ref(0)?),
+                provider: loose_text(row.get_ref(1)?),
+                cost,
+                effective_price_per_million: price_per_million(cost, total_tokens),
+            });
+        }
+        Ok(ModelsReport {
+            generated_at: now,
+            models,
+        })
+    }
+
     pub fn dashboard(&self, period: Period, now: i64) -> Result<Dashboard> {
         let (where_clause, parameters) = usage_range(period, now);
         let bound: Vec<&dyn rusqlite::ToSql> = parameters
@@ -813,35 +887,6 @@ impl Store {
                 first_message_at: loose_opt_i64(row.get_ref(8)?),
                 last_message_at: loose_opt_i64(row.get_ref(9)?),
             }
-        };
-
-        let models = {
-            let mut statement = self.connection.prepare(&format!(
-                r#"
-    SELECT
-      model,
-      provider,
-      SUM(cost_total) AS cost,
-      SUM(total_tokens) AS totalTokens
-    FROM usage_messages
-    {where_clause}
-    GROUP BY model, provider
-    ORDER BY cost DESC, totalTokens DESC
-            "#
-            ))?;
-            let mut rows = statement.query(bound.as_slice())?;
-            let mut models: Vec<ModelSpend> = Vec::new();
-            while let Some(row) = rows.next()? {
-                let cost = loose_f64(row.get_ref(2)?);
-                let total_tokens = loose_i64(row.get_ref(3)?);
-                models.push(ModelSpend {
-                    model: loose_text(row.get_ref(0)?),
-                    provider: loose_text(row.get_ref(1)?),
-                    cost,
-                    effective_price_per_million: price_per_million(cost, total_tokens),
-                });
-            }
-            models
         };
 
         let categories = {
@@ -898,7 +943,6 @@ impl Store {
             generated_at: now,
             last_sync,
             summary,
-            models,
             categories,
             limits: self.read_limits_snapshot()?,
         })

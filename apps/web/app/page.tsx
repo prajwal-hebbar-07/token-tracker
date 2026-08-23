@@ -6,6 +6,16 @@ import { LimitFilter, limitKey, useHiddenLimits } from "./limit-filter";
 import { AppNav } from "./nav";
 import { isDay, PeriodTabs, periodEyebrow, periodLabel, usePeriod } from "./period";
 
+interface ModelsReport {
+  generatedAt: number;
+  models: Array<{
+    model: string;
+    provider: string;
+    cost: number;
+    effectivePricePerMillion: number | null;
+  }>;
+}
+
 interface Dashboard {
   generatedAt: number;
   lastSync: {
@@ -26,12 +36,6 @@ interface Dashboard {
     firstMessageAt: number | null;
     lastMessageAt: number | null;
   };
-  models: Array<{
-    model: string;
-    provider: string;
-    cost: number;
-    effectivePricePerMillion: number | null;
-  }>;
   categories: Array<{
     category: string;
     messageCount: number;
@@ -63,16 +67,31 @@ interface Dashboard {
 
 function isDashboard(value: unknown): value is Dashboard {
   if (!value || typeof value !== "object") return false;
-  if (!("summary" in value) || !("models" in value) || !("categories" in value)) return false;
+  if (!("summary" in value) || !("categories" in value)) return false;
   const summary = value.summary;
   return Boolean(
     summary &&
       typeof summary === "object" &&
       "cost" in summary &&
       typeof summary.cost === "number" &&
-      Array.isArray(value.models) &&
       Array.isArray(value.categories),
   );
+}
+
+function isModelsReport(value: unknown): value is ModelsReport {
+  if (!value || typeof value !== "object") return false;
+  if (!("models" in value) || !Array.isArray(value.models)) return false;
+  return value.models.every((entry) => {
+    if (!entry || typeof entry !== "object") return false;
+    return (
+      "model" in entry &&
+      typeof entry.model === "string" &&
+      "provider" in entry &&
+      typeof entry.provider === "string" &&
+      "cost" in entry &&
+      typeof entry.cost === "number"
+    );
+  });
 }
 
 function importWarnings(payload: unknown): string[] {
@@ -235,7 +254,6 @@ function DashboardSkeleton() {
       <StatGridSkeleton />
       <CategoryGridSkeleton />
       <LimitsSkeleton />
-      <ModelDeckSkeleton />
     </>
   );
 }
@@ -248,8 +266,10 @@ let autoFetched = false;
 
 export default function DashboardPage() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
+  const [modelsReport, setModelsReport] = useState<ModelsReport | null>(null);
   const { period } = usePeriod();
   const [loading, setLoading] = useState(true);
+  const [modelsLoading, setModelsLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -280,6 +300,12 @@ export default function DashboardPage() {
     return payload;
   }, [period]);
 
+  const loadModels = useCallback(async (): Promise<ModelsReport> => {
+    const payload = await requestJson(`/api/models?period=${period}`);
+    if (!isModelsReport(payload)) throw new Error("The API returned an invalid models response");
+    return payload;
+  }, [period]);
+
   useEffect(() => {
     let active = true;
     setDashboard(null);
@@ -300,6 +326,25 @@ export default function DashboardPage() {
     };
   }, [loadDashboard]);
 
+  useEffect(() => {
+    let active = true;
+    setModelsReport(null);
+    setModelsLoading(true);
+    loadModels()
+      .then((payload) => {
+        if (active) setModelsReport(payload);
+      })
+      .catch((reason: unknown) => {
+        if (active) setError(reason instanceof Error ? reason.message : "Could not load the model matrix");
+      })
+      .finally(() => {
+        if (active) setModelsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [loadModels]);
+
   const fetchUsage = useCallback(async () => {
     setImporting(true);
     setError(null);
@@ -316,9 +361,13 @@ export default function DashboardPage() {
         const stageWarnings = importWarnings(payload);
         accumulatedWarnings.push(...stageWarnings);
         setStage(stage, { state: "done", message: null });
-        // Refresh the dashboard as soon as usage or limits land so the numbers
-        // appear incrementally instead of waiting for the whole pipeline.
-        if (stage === "usage" || stage === "limits") {
+        // Refresh the dashboard and model matrix as soon as usage lands so the
+        // numbers appear incrementally instead of waiting for the whole pipeline.
+        if (stage === "usage") {
+          setDashboard(await loadDashboard());
+          setModelsReport(await loadModels());
+        }
+        if (stage === "limits") {
           setDashboard(await loadDashboard());
         }
       }
@@ -336,7 +385,7 @@ export default function DashboardPage() {
     } finally {
       setImporting(false);
     }
-  }, [loadDashboard, resetStages, setStage]);
+  }, [loadDashboard, loadModels, resetStages, setStage]);
 
   // Opening the app imports once on its own, so what is on screen is what Oh My
   // Pi has recorded without the button having to be pressed. Every later refresh
@@ -347,6 +396,28 @@ export default function DashboardPage() {
     autoFetched = true;
     void fetchUsage();
   }, [fetchUsage]);
+  // Command/Ctrl+R reloads the data from Oh My Pi instead of reloading the page,
+  // so the keyboard shortcut runs the same fetch pipeline as the button.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (!(event.metaKey || event.ctrlKey) || (event.key !== "r" && event.key !== "R")) return;
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      event.preventDefault();
+      if (importing) return;
+      void fetchUsage();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [fetchUsage, importing]);
 
   const limits = dashboard?.limits ?? null;
   // A card whose every window is hidden has nothing left to say, so it goes too.
@@ -356,7 +427,7 @@ export default function DashboardPage() {
     );
     return windows.length === 0 && provider.windows.length > 0 ? [] : [{ ...provider, windows }];
   });
-  const models = dashboard?.models.filter((model) => !hiddenModels[model.model]) ?? [];
+  const models = modelsReport?.models.filter((model) => !hiddenModels[model.model]) ?? [];
   const categories = dashboard?.categories ?? [];
   const prices = models.flatMap((model) =>
     model.effectivePricePerMillion === null ? [] : [model.effectivePricePerMillion],
@@ -368,6 +439,7 @@ export default function DashboardPage() {
 
   const usageReady = !importing || stages.usage.state === "done";
   const limitsReady = !importing || stages.limits.state === "done";
+  const modelsReady = modelsReport !== null;
   const showSkeletonDashboard = importing && !usageReady;
 
   return (
@@ -576,58 +648,62 @@ export default function DashboardPage() {
             )
           )}
 
-          <section className="panel sectionPanel">
-            <div className="panelHeading">
-              <div><p className="eyebrow">MODEL ECONOMICS</p><h2>Usage and effective price</h2></div>
-              <span>RING = SHARE OF SPEND · BAR = PRICE VS PRICIEST</span>
-            </div>
-            <div className="modelDeck">
-              {models.map((model, index) => {
-                const price = model.effectivePricePerMillion;
-                const label = priceLabel(price);
-                const share = dashboard.summary.cost ? (model.cost / dashboard.summary.cost) * 100 : 0;
-                const priceShare = priciest > 0 && price !== null ? (price / priciest) * 100 : 0;
-                const badge = !rankable || price === null
-                  ? null
-                  : price === priciest
-                    ? "Priciest"
-                    : price === cheapest
-                      ? "Best value"
-                      : null;
-                return (
-                  <article className={`modelCard tone${index % 4}`} key={`${model.provider}/${model.model}`}>
-                    <div className="modelCardTop">
-                      <span className="modelRank">{String(index + 1).padStart(2, "0")}</span>
-                      {badge && <span className="modelBadge">{badge}</span>}
-                    </div>
-
-                    <div className="modelRing" style={{ "--share": share } as CSSProperties}>
-                      <div className="modelRingTrack" />
-                      <div className="modelRingValue">
-                        <strong>{label.value}</strong>
-                        <small>{label.caption}</small>
+          {modelsReady ? (
+            <section className="panel sectionPanel">
+              <div className="panelHeading">
+                <div><p className="eyebrow">MODEL ECONOMICS</p><h2>Usage and effective price</h2></div>
+                <span>RING = SHARE OF SPEND · BAR = PRICE VS PRICIEST</span>
+              </div>
+              <div className="modelDeck">
+                {models.map((model, index) => {
+                  const price = model.effectivePricePerMillion;
+                  const label = priceLabel(price);
+                  const share = dashboard?.summary.cost ? (model.cost / dashboard.summary.cost) * 100 : 0;
+                  const priceShare = priciest > 0 && price !== null ? (price / priciest) * 100 : 0;
+                  const badge = !rankable || price === null
+                    ? null
+                    : price === priciest
+                      ? "Priciest"
+                      : price === cheapest
+                        ? "Best value"
+                        : null;
+                  return (
+                    <article className={`modelCard tone${index % 4}`} key={`${model.provider}/${model.model}`}>
+                      <div className="modelCardTop">
+                        <span className="modelRank">{String(index + 1).padStart(2, "0")}</span>
+                        {badge && <span className="modelBadge">{badge}</span>}
                       </div>
-                    </div>
 
-                    <h3>{model.model}</h3>
-                    <p className="modelProvider">
-                      {model.provider}
-                      {estimatedModels[model.model.toLowerCase()] ? " · estimated" : ""}
-                    </p>
+                      <div className="modelRing" style={{ "--share": share } as CSSProperties}>
+                        <div className="modelRingTrack" />
+                        <div className="modelRingValue">
+                          <strong>{label.value}</strong>
+                          <small>{label.caption}</small>
+                        </div>
+                      </div>
 
-                    <div className="modelSpend">
-                      <strong>{money.format(model.cost)}</strong>
-                      {share >= 0.05 && <span>{share.toFixed(1)}% of spend</span>}
-                    </div>
+                      <h3>{model.model}</h3>
+                      <p className="modelProvider">
+                        {model.provider}
+                        {estimatedModels[model.model.toLowerCase()] ? " · estimated" : ""}
+                      </p>
 
-                    <div className="priceMeter" aria-hidden="true">
-                      <div style={{ width: `${priceShare}%` }} />
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          </section>
+                      <div className="modelSpend">
+                        <strong>{money.format(model.cost)}</strong>
+                        {share >= 0.05 && <span>{share.toFixed(1)}% of spend</span>}
+                      </div>
+
+                      <div className="priceMeter" aria-hidden="true">
+                        <div style={{ width: `${priceShare}%` }} />
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          ) : (
+            <ModelDeckSkeleton />
+          )}
         </>
       )}
     </main>

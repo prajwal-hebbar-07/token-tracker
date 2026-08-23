@@ -220,6 +220,13 @@ fn api_reply(
                 Err(error) => Reply::error(500, error.to_string()),
             },
         },
+        (Method::Get, "/api/models") => match period_from(query) {
+            None => Reply::error(400, BAD_PERIOD),
+            Some(period) => match store.models(period, now_millis()) {
+                Ok(models) => Reply::json(200, &models),
+                Err(error) => Reply::error(500, error.to_string()),
+            },
+        },
         (Method::Get, "/api/projects") => match period_from(query) {
             None => Reply::error(400, BAD_PERIOD),
             Some(period) => match store.projects(period, now_millis()) {

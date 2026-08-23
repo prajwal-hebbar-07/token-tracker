@@ -186,7 +186,7 @@ fn port_matches_the_typescript_reference() {
         ("pastDay", local_day(now - 40 * 86_400_000)),
     ];
 
-    let mut actual = serde_json::json!({ "dashboard": {}, "projects": {} });
+    let mut actual = serde_json::json!({ "dashboard": {}, "models": {}, "projects": {} });
     for (name, period) in periods {
         actual["dashboard"][name] = serde_json::to_value(
             store
@@ -194,6 +194,12 @@ fn port_matches_the_typescript_reference() {
                 .expect("the port could not build the dashboard"),
         )
         .expect("the dashboard did not serialise");
+        actual["models"][name] = serde_json::to_value(
+            store
+                .models(period, now)
+                .expect("the port could not build the models report"),
+        )
+        .expect("the models report did not serialise");
         actual["projects"][name] = serde_json::to_value(
             store
                 .projects(period, now)

@@ -4,7 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { getDashboard, getProjects, importFromOmp, isDashboardPeriod, openTrackerDatabase, saveLimitsSnapshot } from "../src/db.js";
+import { getDashboard, getModels, getProjects, importFromOmp, isDashboardPeriod, openTrackerDatabase, saveLimitsSnapshot } from "../src/db.js";
 
 function writeSession(filePath: string, userText: string, entryIds: string[], cwd?: string): void {
   const lines: string[] = [];
@@ -98,7 +98,8 @@ test("imports OMP rows idempotently and applies recorded and estimated prices", 
     assert.ok(firstDebugging);
     assert.equal(firstDebugging.totalTokens, 550);
 
-    const claude = firstDashboard.models.find((model) => model.model === "claude-opus-5");
+    const firstModels = getModels(tracker);
+    const claude = firstModels.models.find((model) => model.model === "claude-opus-5");
     assert.ok(claude);
     assertClose(claude.cost, 0.056);
     assertClose(claude.effectivePricePerMillion, (0.056 / 13_300) * 1_000_000);
@@ -156,7 +157,8 @@ test("imports OMP rows idempotently and applies recorded and estimated prices", 
 
     const finalDashboard = getDashboard(tracker);
     assertClose(finalDashboard.summary.cost, 0.42400012);
-    const minimax = finalDashboard.models.find((model) => model.model === "minimax-m3");
+    const finalModels = getModels(tracker);
+    const minimax = finalModels.models.find((model) => model.model === "minimax-m3");
     assert.ok(minimax);
     assertClose(minimax.cost, 0.36600012);
     assertClose(minimax.effectivePricePerMillion, (0.36600012 / 930_001) * 1_000_000);
@@ -203,7 +205,7 @@ test("imports OMP rows idempotently and applies recorded and estimated prices", 
     assertClose(kimiLongPrompt.cost_output, 0.04);
     assertClose(kimiLongPrompt.cost_total, 0.61);
 
-    const kimi = getDashboard(tracker).models.find((model) => model.model === "kimi-k2.6");
+    const kimi = getModels(tracker).models.find((model) => model.model === "kimi-k2.6");
     assert.ok(kimi);
     assertClose(kimi.cost, 0.888);
     assertClose(kimi.effectivePricePerMillion, (0.888 / 880_000) * 1_000_000);
@@ -303,8 +305,9 @@ test("filters every dashboard aggregate to today, a chosen day, and the current 
     assert.equal(today.summary.sessionCount, 1);
     assert.equal(today.summary.totalTokens, 8_100);
     assertClose(today.summary.cost, 0.03);
-    assert.equal(today.models.length, 1);
-    assert.equal(today.models[0]?.model, "claude-opus-5");
+    const todayModels = getModels(tracker, "today", now);
+    assert.equal(todayModels.models.length, 1);
+    assert.equal(todayModels.models[0]?.model, "claude-opus-5");
     assert.equal(today.categories.length, 1);
     assert.equal(today.categories[0]?.totalTokens, 8_100);
 
@@ -313,8 +316,9 @@ test("filters every dashboard aggregate to today, a chosen day, and the current 
     assert.equal(month.summary.sessionCount, 1);
     assert.equal(month.summary.totalTokens, 13_300);
     assertClose(month.summary.cost, 0.056);
-    assert.equal(month.models.length, 1);
-    assert.equal(month.models[0]?.model, "claude-opus-5");
+    const monthModels = getModels(tracker, "month", now);
+    assert.equal(monthModels.models.length, 1);
+    assert.equal(monthModels.models[0]?.model, "claude-opus-5");
     assert.equal(month.categories.length, 1);
     assert.equal(month.categories[0]?.totalTokens, 13_300);
 
@@ -324,7 +328,8 @@ test("filters every dashboard aggregate to today, a chosen day, and the current 
     assert.equal(chosenDay.summary.messageCount, 1);
     assert.equal(chosenDay.summary.totalTokens, 5_200);
     assertClose(chosenDay.summary.cost, 0.026);
-    assert.equal(chosenDay.models.length, 1);
+    const chosenDayModels = getModels(tracker, "2026-08-15", now);
+    assert.equal(chosenDayModels.models.length, 1);
     assert.equal(getProjects(tracker, "2026-08-15", now).period, "2026-08-15");
 
     // A day nothing was recorded on is empty rather than an error.
@@ -449,7 +454,8 @@ test("preserves the work-category column from earlier builds", () => {
     // Existing rows survive the migration and still aggregate.
     const dashboard = getDashboard(tracker);
     assert.equal(dashboard.summary.messageCount, 1);
-    assertClose(dashboard.models[0]?.cost, 0.02);
+    const models = getModels(tracker);
+    assertClose(models.models[0]?.cost, 0.02);
     const design = dashboard.categories.find((entry) => entry.category === "Design");
     assert.ok(design);
     assert.equal(design.totalTokens, 1_100);

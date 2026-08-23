@@ -147,11 +147,17 @@ pub struct CategorySpend {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ModelsReport {
+    pub generated_at: i64,
+    pub models: Vec<ModelSpend>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Dashboard {
     pub generated_at: i64,
     pub last_sync: Option<LastSync>,
     pub summary: Summary,
-    pub models: Vec<ModelSpend>,
     pub categories: Vec<CategorySpend>,
     pub limits: Option<LimitsSnapshot>,
 }

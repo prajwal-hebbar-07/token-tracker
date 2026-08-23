@@ -16,6 +16,7 @@ import {
   type DashboardPeriod,
   type DayPeriod,
   getDashboard,
+  getModels,
   getProjects,
   importFromOmp,
   openTrackerDatabase,
@@ -200,6 +201,7 @@ const periods: Array<[string, DashboardPeriod]> = [
 ];
 const output = {
   dashboard: Object.fromEntries(periods.map(([name, period]) => [name, getDashboard(tracker, period, now)])),
+  models: Object.fromEntries(periods.map(([name, period]) => [name, getModels(tracker, period, now)])),
   projects: Object.fromEntries(periods.map(([name, period]) => [name, getProjects(tracker, period, now)])),
 };
 tracker.close();

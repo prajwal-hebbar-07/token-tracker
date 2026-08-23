@@ -69,6 +69,16 @@ interface UsageRow {
   project_path?: string | null;
 }
 
+export interface ModelsReport {
+  generatedAt: number;
+  models: Array<{
+    model: string;
+    provider: string;
+    cost: number;
+    effectivePricePerMillion: number | null;
+  }>;
+}
+
 export interface Dashboard {
   generatedAt: number;
   lastSync: {
@@ -89,12 +99,6 @@ export interface Dashboard {
     firstMessageAt: number | null;
     lastMessageAt: number | null;
   };
-  models: Array<{
-    model: string;
-    provider: string;
-    cost: number;
-    effectivePricePerMillion: number | null;
-  }>;
   categories: Array<{
     category: UsageCategory;
     messageCount: number;
@@ -417,11 +421,33 @@ export function importFromOmp(
 
   try {
     const rows = source.prepare(`SELECT ${usageColumns} FROM messages ORDER BY id`).all() as unknown as UsageRow[];
+
+    // Session-file parsing is the slow part of a large import. Rows that are
+    // already stored keep their derived category and project path, so only new
+    // rows pay the cost of reading their transcript and classifying it.
+    const existingByKey = new Map<string, { category: UsageCategory; project_path: string | null }>();
+    const existingRows = tracker.prepare(
+      "SELECT session_file, entry_id, category, project_path FROM usage_messages",
+    ).all() as Array<{ session_file: string; entry_id: string; category: UsageCategory; project_path: string | null }>;
+    for (const row of existingRows) {
+      existingByKey.set(`${row.session_file}\0${row.entry_id}`, {
+        category: row.category,
+        project_path: row.project_path,
+      });
+    }
+
     const sessionFiles = new Map<string, SessionFile>();
     // Subagent transcripts carry no session header, so the working directory is
     // resolved per folder: any session that recorded one speaks for the slug.
     const pathByFolder = new Map<string, string>();
     for (const row of rows) {
+      const key = `${row.session_file}\0${row.entry_id}`;
+      const existing = existingByKey.get(key);
+      if (existing) {
+        row.category = existing.category;
+        row.project_path = existing.project_path;
+        continue;
+      }
       let session = sessionFiles.get(row.session_file);
       if (!session) {
         session = readSessionFile(row.session_file);
@@ -433,7 +459,9 @@ export function importFromOmp(
       }
     }
     for (const row of rows) {
-      row.project_path = pathByFolder.get(row.folder) ?? null;
+      if (row.project_path === undefined) {
+        row.project_path = pathByFolder.get(row.folder) ?? null;
+      }
     }
     const beforeRow = tracker.prepare("SELECT COUNT(*) AS count FROM usage_messages").get();
     if (!beforeRow || typeof beforeRow.count !== "number") {
@@ -651,6 +679,44 @@ function readLimitsSnapshot(tracker: DatabaseSync): LimitsSnapshot | null {
   return typeof snapshot.capturedAt === "number" && Array.isArray(snapshot.providers) ? snapshot : null;
 }
 
+export function getModels(
+  tracker: DatabaseSync,
+  period: DashboardPeriod = "all",
+  now = Date.now(),
+): ModelsReport {
+  const range = usageRange(period, now);
+  const models = (tracker.prepare(`
+    SELECT
+      model,
+      provider,
+      SUM(cost_total) AS cost,
+      SUM(total_tokens) AS totalTokens
+    FROM usage_messages
+    ${range.where}
+    GROUP BY model, provider
+    ORDER BY cost DESC, totalTokens DESC
+  `).all(...range.parameters) as unknown as Array<{
+    model: string;
+    provider: string;
+    cost: number | null;
+    totalTokens: number | null;
+  }>).map((row) => {
+    const cost = numberOrZero(row.cost);
+    return {
+      model: row.model,
+      provider: row.provider,
+      cost,
+      // Blended rate actually paid across input, output, and cache traffic.
+      effectivePricePerMillion: pricePerMillion(cost, numberOrZero(row.totalTokens)),
+    };
+  });
+
+  return {
+    generatedAt: now,
+    models,
+  };
+}
+
 export function getDashboard(
   tracker: DatabaseSync,
   period: DashboardPeriod = "all",
@@ -684,31 +750,6 @@ export function getDashboard(
     lastMessageAt: number | null;
   };
 
-  const models = (tracker.prepare(`
-    SELECT
-      model,
-      provider,
-      SUM(cost_total) AS cost,
-      SUM(total_tokens) AS totalTokens
-    FROM usage_messages
-    ${range.where}
-    GROUP BY model, provider
-    ORDER BY cost DESC, totalTokens DESC
-  `).all(...range.parameters) as unknown as Array<{
-    model: string;
-    provider: string;
-    cost: number | null;
-    totalTokens: number | null;
-  }>).map((row) => {
-    const cost = numberOrZero(row.cost);
-    return {
-      model: row.model,
-      provider: row.provider,
-      cost,
-      // Blended rate actually paid across input, output, and cache traffic.
-      effectivePricePerMillion: pricePerMillion(cost, numberOrZero(row.totalTokens)),
-    };
-  });
   const categories = (tracker.prepare(`
     SELECT
       category,
@@ -761,7 +802,6 @@ export function getDashboard(
       firstMessageAt: summary.firstMessageAt === null ? null : Number(summary.firstMessageAt),
       lastMessageAt: summary.lastMessageAt === null ? null : Number(summary.lastMessageAt),
     },
-    models,
     categories,
     limits: readLimitsSnapshot(tracker),
   };
