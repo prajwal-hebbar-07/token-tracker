@@ -1,0 +1,5 @@
+.turbo/**
+.vscodeignore
+src/**
+tsconfig.json
+*.vsix

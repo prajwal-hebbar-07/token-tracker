@@ -1,0 +1,43 @@
+{
+  "name": "token-tracker",
+  "displayName": "Token Tracker",
+  "description": "Local Oh My Pi token usage, spend and provider quotas in a VS Code panel",
+  "publisher": "prajwal-hebbar-07",
+  "version": "1.1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/prajwal-hebbar-07/token-tracker.git"
+  },
+  "engines": {
+    "vscode": "^1.104.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "icon": "icon.png",
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "tokenTracker.open",
+        "title": "Token Tracker: Open Dashboard"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && esbuild src/extension.ts --bundle --platform=node --target=node22 --format=cjs --external:vscode --outfile=dist/extension.js && node -e \"const fs = require('node:fs'); fs.rmSync('media', { force: true, recursive: true }); fs.cpSync('../web/out', 'media/web', { recursive: true })\"",
+    "package": "vsce package --no-dependencies --out token-tracker.vsix"
+  },
+  "dependencies": {
+    "@token-tracker/api": "workspace:*",
+    "@token-tracker/web": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "26.2.0",
+    "@types/vscode": "1.104.0",
+    "@vscode/vsce": "3.9.2",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2"
+  }
+}

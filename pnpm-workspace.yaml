@@ -1,7 +1,12 @@
 packages:
   - "apps/*"
 allowBuilds:
+  # Both belong to @vscode/vsce and are only used by `vsce publish`: keytar
+  # stores the marketplace token, vsce-sign signs an uploaded package. Packaging
+  # a .vsix needs neither, so neither is built.
+  '@vscode/vsce-sign': false
   esbuild: true
+  keytar: false
 minimumReleaseAgeExclude:
   - '@turbo/darwin-64@2.10.10'
   - '@turbo/darwin-arm64@2.10.10'

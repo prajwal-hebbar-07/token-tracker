@@ -8,6 +8,8 @@ apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/gen/
 *.tsbuildinfo
 apps/api/data/
+apps/vscode/media/
+*.vsix
 .env
 .env.local
 .DS_Store

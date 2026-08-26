@@ -36,6 +36,36 @@ The finished installer is written to
 containing `Token Tracker.app`. `pnpm dev` runs the same app from a debug build
 for development.
 
+## Install the VS Code extension
+
+The same dashboard also runs as an editor panel. Download
+`Token-Tracker-<version>.vsix` from the same
+[Releases](../../releases) page and install it:
+
+```bash
+code --install-extension Token-Tracker-<version>.vsix
+```
+
+Run **Token Tracker: Open Dashboard** from the Command Palette. The extension
+starts its own loopback server inside the extension host, serves the dashboard
+and `/api` from that one origin, and imports once when the panel opens. Its
+database lives in the extension's global storage directory, so it is separate
+from the desktop app's.
+
+The extension host has to provide `node:sqlite`; VS Code 1.134 does. Older
+builds may ship a Node without it, and the extension then fails to activate
+rather than opening an empty panel.
+
+Building the extension locally needs no Rust toolchain:
+
+```bash
+pnpm install
+pnpm build
+pnpm --filter ./apps/vscode run package
+```
+
+That writes `apps/vscode/token-tracker.vsix`, which installs the same way.
+
 ## How it works
 
 The desktop app is a single binary. On launch it binds a loopback HTTP server
@@ -47,6 +77,12 @@ Opening the app imports once on its own, so the dashboard shows what Oh My Pi
 has recorded without anything having to be pressed. That is the only automatic
 run: there is no polling and no background sync, and every later refresh is the
 **Fetch Oh My Pi data** button.
+
+The VS Code extension is the same arrangement one layer up: the extension host
+binds the loopback server itself — reusing the TypeScript API in `apps/api`
+rather than the Rust port — and the panel is a webview holding an iframe on that
+port. The bundle keeps its own origin that way, so its relative `fetch("/api/…")`
+calls reach the extension's server unchanged.
 
 ## Using the dashboard
 
@@ -124,6 +160,11 @@ its own SQLite database into the per-user application-data directory, which on
 macOS is `~/Library/Application Support/com.tokentracker.desktop/token-tracker.sqlite`.
 Setting `DATA_DIR` overrides that directory.
 
+The extension keeps its database in VS Code's global storage directory instead,
+which on macOS is
+`~/Library/Application Support/Code/User/globalStorage/prajwal-hebbar-07.token-tracker/token-tracker.sqlite`,
+so installing both leaves each with its own copy.
+
 Account limits come from each provider rather than from estimates based on
 local token counts. Oh My Pi supplies the supported providers; Ollama Cloud's
 session and weekly percentages come from its account usage endpoint. Token
@@ -160,9 +201,10 @@ into the app, so `apps/web` is built rather than served, and nothing listens on
 a fixed port.
 
 The desktop backend is a Rust port of the API in `apps/api`, which is still the
-reference implementation. `cargo test` inside `apps/desktop/src-tauri` imports
-one fixture with both and compares the resulting dashboard and projects reports
-field by field, so the two cannot disagree about a number without failing:
+reference implementation and is what the VS Code extension runs directly.
+`cargo test` inside `apps/desktop/src-tauri` imports one fixture with both and
+compares the resulting dashboard and projects reports field by field, so the two
+cannot disagree about a number without failing:
 
 ```bash
 cd apps/desktop/src-tauri && cargo test
@@ -176,11 +218,12 @@ the `patch`, `minor` or `major` version, and run it. The workflow owns the
 version number, so nothing needs editing by hand beforehand.
 
 It writes the new version into `apps/desktop/src-tauri/tauri.conf.json`,
-`apps/desktop/src-tauri/Cargo.toml`, `apps/desktop/package.json` and
-`apps/desktop/src-tauri/Cargo.lock` together, runs both test suites, builds the
-universal macOS bundle, and only then commits the bump, tags it `v<version>`,
-pushes the commit and the tag, and publishes the release with
-`Token-Tracker-<version>-universal.dmg` attached.
+`apps/desktop/src-tauri/Cargo.toml`, `apps/desktop/package.json`,
+`apps/vscode/package.json` and `apps/desktop/src-tauri/Cargo.lock` together, runs
+both test suites, builds the universal macOS bundle and the extension, and only
+then commits the bump, tags it `v<version>`, pushes the commit and the tag, and
+publishes the release with `Token-Tracker-<version>-universal.dmg` and
+`Token-Tracker-<version>.vsix` attached.
 
 The order matters: a failed test or a failed build pushes nothing at all, so the
 repository is never left claiming a version that was never released. Pull

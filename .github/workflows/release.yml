@@ -30,7 +30,7 @@ concurrency:
 
 jobs:
   macos:
-    name: Build and publish the macOS installer
+    name: Build and publish the installer and the extension
     runs-on: macos-latest
     timeout-minutes: 60
 
@@ -88,6 +88,7 @@ jobs:
         run: |
           conf=apps/desktop/src-tauri/tauri.conf.json
           pkg=apps/desktop/package.json
+          extension=apps/vscode/package.json
           manifest=apps/desktop/src-tauri/Cargo.toml
 
           # Rewriting only the version literal keeps these edits to one line per
@@ -99,12 +100,13 @@ jobs:
           }
           set_json_version "$conf"
           set_json_version "$pkg"
+          set_json_version "$extension"
           awk -v v="$NEXT" '!seen && /^version = / { print "version = \"" v "\""; seen = 1; next } { print }' \
             "$manifest" > "$manifest.tmp" && mv "$manifest.tmp" "$manifest"
 
           # A silently failed edit would publish a mislabelled installer, so each
           # file is read back rather than trusted.
-          for file in "$conf" "$pkg"; do
+          for file in "$conf" "$pkg" "$extension"; do
             found="$(jq -r .version "$file")"
             if [ "$found" != "$NEXT" ]; then
               echo "::error::${file} still reads ${found} instead of ${NEXT}."
@@ -151,10 +153,27 @@ jobs:
           echo "path=dist/${name}" >> "$GITHUB_OUTPUT"
           echo "name=${name}" >> "$GITHUB_OUTPUT"
 
+      # The extension serves the same dashboard bundle and the same TypeScript
+      # API the installer ships, so `turbo build` gives it both: the export the
+      # Tauri run already produced, and the compiled API it imports.
+      - name: Package the VS Code extension
+        id: extension
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
+        run: |
+          pnpm build
+          pnpm --filter ./apps/vscode run package
+          name="Token-Tracker-${NEXT}.vsix"
+          mv apps/vscode/token-tracker.vsix "dist/${name}"
+          echo "path=dist/${name}" >> "$GITHUB_OUTPUT"
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/upload-artifact@v7
         with:
-          name: token-tracker-macos-${{ steps.version.outputs.next }}
-          path: ${{ steps.installer.outputs.path }}
+          name: token-tracker-${{ steps.version.outputs.next }}
+          path: |
+            ${{ steps.installer.outputs.path }}
+            ${{ steps.extension.outputs.path }}
           if-no-files-found: error
 
       # Everything below only runs once the tests and the build have passed, so a
@@ -173,7 +192,8 @@ jobs:
             apps/desktop/src-tauri/tauri.conf.json \
             apps/desktop/src-tauri/Cargo.toml \
             apps/desktop/src-tauri/Cargo.lock \
-            apps/desktop/package.json
+            apps/desktop/package.json \
+            apps/vscode/package.json
           git commit -m "chore(release): ${TAG}"
           git tag "$TAG"
           git push origin "HEAD:${BRANCH}"
@@ -185,7 +205,9 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ${{ steps.version.outputs.tag }}
-          files: ${{ steps.installer.outputs.path }}
+          files: |
+            ${{ steps.installer.outputs.path }}
+            ${{ steps.extension.outputs.path }}
           fail_on_unmatched_files: true
           generate_release_notes: true
           body: |
@@ -197,4 +219,12 @@ jobs:
 
             ```bash
             xattr -dr com.apple.quarantine "/Applications/Token Tracker.app"
+            ```
+
+            ### VS Code
+
+            `${{ steps.extension.outputs.name }}` is the same dashboard as an editor panel. Install it, then run **Token Tracker: Open Dashboard** from the Command Palette:
+
+            ```bash
+            code --install-extension ${{ steps.extension.outputs.name }}
             ```
