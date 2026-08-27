@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createInterface } from "node:readline";
 import type { DatabaseSync } from "node:sqlite";
+import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import {
   type DashboardPeriod,
@@ -12,10 +13,12 @@ import {
 } from "@token-tracker/api/dist/db.js";
 import { runImport } from "@token-tracker/api/dist/import.js";
 import { formatImport, formatUsage } from "./format.js";
+import { ensureDashboard, stopDashboard } from "./host.js";
 import { resolveTrackerDatabasePath } from "./paths.js";
+import { MCP_VERSION } from "./version.js";
 
 const FALLBACK_PROTOCOL = "2025-03-26";
-const SERVER_INFO = { name: "token-tracker", version: "1.2.0" };
+const SERVER_INFO = { name: "token-tracker", version: MCP_VERSION };
 
 interface JsonRpcRequest {
   jsonrpc?: string;
@@ -38,7 +41,7 @@ const TOOLS = [
   {
     name: "get_usage",
     description:
-      "Read saved token usage, spend, model mix, projects, and account limits. period is today, month, all, or a YYYY-MM-DD date. Defaults to month.",
+      "Read saved token usage, spend, model mix, projects, and account limits. period is today, month, all, or a YYYY-MM-DD date. Defaults to month. Use this for numbers in chat. To show the visual dashboard, call open_dashboard instead.",
     inputSchema: {
       type: "object",
       properties: {
@@ -49,6 +52,12 @@ const TOOLS = [
       },
       additionalProperties: false,
     },
+  },
+  {
+    name: "open_dashboard",
+    description:
+      "Start the local Token Tracker dashboard and return its URL. Open that URL in Cursor's Browser pane (the Browser item next to Changes, Terminal, and Files in the Agents window) so the user can see spend, models, projects, and quotas. Do not open an external browser.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
 ];
 
@@ -125,6 +134,19 @@ export async function dispatch(
           ),
         );
       }
+      if (name === "open_dashboard") {
+        const { url } = await ensureDashboard(tracker);
+        return ok(
+          id,
+          textResult(
+            [
+              `Dashboard: ${url}`,
+              "Open this URL in Cursor's Browser pane (Agents window → Browser, next to Changes, Terminal, and Files).",
+              "Do not open a system browser window.",
+            ].join("\n"),
+          ),
+        );
+      }
       return fail(id, -32601, `Unknown tool: ${name}`);
     }
     return fail(id, -32601, `Method not found: ${method}`);
@@ -138,6 +160,7 @@ export async function dispatch(
 export function startStdio(tracker: DatabaseSync): void {
   const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
   const shutDown = (): void => {
+    stopDashboard();
     try {
       tracker.close();
     } catch {
@@ -173,8 +196,19 @@ export function startStdio(tracker: DatabaseSync): void {
 }
 
 function main(): void {
-  startStdio(openTrackerDatabase(resolveTrackerDatabasePath()));
+  const tracker = openTrackerDatabase(resolveTrackerDatabasePath());
+  void ensureDashboard(tracker).catch((error) => {
+    const detail = error instanceof Error ? error.message : "Could not start the dashboard";
+    process.stderr.write(`${detail}\n`);
+  });
+  startStdio(tracker);
 }
 
 const entry = process.argv[1];
-if (entry && import.meta.url === pathToFileURL(entry).href) main();
+if (entry) {
+  try {
+    if (import.meta.url === pathToFileURL(realpathSync(entry)).href) main();
+  } catch {
+    // argv[1] is not a real file (tests).
+  }
+}

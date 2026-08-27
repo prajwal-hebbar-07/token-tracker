@@ -66,30 +66,46 @@ pnpm --filter ./apps/vscode run package
 
 That writes `apps/vscode/token-tracker.vsix`, which installs the same way.
 
-## Use it from Cursor Agent chat
+## Install the MCP for Cursor Agent
 
-The same import and reports are also an MCP server, so Agent chat can answer
-spend and quota questions without the desktop app or the editor dashboard.
+The same dashboard also runs inside Cursor Agent chat, and in the Agents window
+**Browser** pane. Download `Token-Tracker-<version>-mcp.zip` from
+[Releases](../../releases). It needs Node.js 22.5+ (`node -v`).
 
-Build it once (Node 22.5+):
+```bash
+unzip Token-Tracker-<version>-mcp.zip
+cd token-tracker-mcp
+node install.js
+```
+
+That copies the server to `~/.token-tracker/mcp`, writes `~/.cursor/mcp.json`,
+and installs the skill. Reload MCP from **Customize** in Cursor, then ask
+**open the dashboard** or **how much have I spent this month?**
+
+The visual dashboard is the **Browser** item next to Changes, Terminal, and
+Files. The server prefers the desktop app's SQLite file when that exists,
+otherwise `~/.token-tracker/token-tracker.sqlite`. This is local to this
+machine; cloud agents cannot read it.
+
+Uninstall:
+
+```bash
+node ~/.token-tracker/mcp/install.js --uninstall
+```
+
+### Build it yourself instead
+
+Building locally requires Node.js 22.5+ and pnpm.
 
 ```bash
 pnpm install
 pnpm --filter @token-tracker/mcp build
+pnpm --filter @token-tracker/mcp run package
 ```
 
-This repository already has `.cursor/mcp.json`, which points Cursor at
-`apps/mcp/dist/server.js`. For the same tools in every project, copy that file
-to `~/.cursor/mcp.json` and change the script path to the absolute location of
-`apps/mcp/dist/server.js` on this machine. Reload MCP servers from **Customize**
-after the first build.
-
-Ask Agent chat things like "how much have I spent this month?" It will call
-`refresh_usage` then `get_usage`. The server prefers the desktop app's SQLite
-file when that exists, otherwise it uses `~/.token-tracker/token-tracker.sqlite`.
-
-This is local stdio MCP: it runs on this machine next to your Cursor session.
-Cloud / background agents cannot read that database.
+The zip is written to `apps/mcp/Token-Tracker-<version>-mcp.zip`. This
+repository also has `.cursor/mcp.json` for development, pointing at
+`apps/mcp/dist/server.js`.
 
 ## How it works
 
@@ -110,8 +126,9 @@ port. The bundle keeps its own origin that way, so its relative `fetch("/api/…
 calls reach the extension's server unchanged.
 
 The MCP server is the TypeScript API without a window: Cursor spawns
-`apps/mcp/dist/server.js` over stdio and the agent calls `refresh_usage` /
-`get_usage` instead of loading the dashboard.
+`~/.token-tracker/mcp/server.js` after a release install, or
+`apps/mcp/dist/server.js` during development, and the agent calls
+`refresh_usage` / `get_usage` / `open_dashboard`.
 
 ## Using the dashboard
 
@@ -225,7 +242,8 @@ timestamps. Cursor auth is read from the local Cursor session (or
 | `CURSOR_API_KEY` | Cursor session | Optional Cursor user API key (`crsr_...`) |
 | `CURSOR_ACCESS_TOKEN` | Cursor session | Optional Cursor session token override |
 | `CURSOR_STATE_DB` | Cursor `state.vscdb` | Cursor IDE state database used for the session token |
-| `TOKEN_TRACKER_PORT` | ephemeral | Desktop app loopback port; `0` picks any free port |
+| `TOKEN_TRACKER_PORT` | `0` desktop / `17333` MCP | Loopback port. Desktop `0` picks any free port; the MCP dashboard defaults to `17333` so the Agents window Browser pane has a stable URL |
+| `TOKEN_TRACKER_WEB` | `apps/mcp/dist/web` | Optional path to the exported dashboard `index.html` directory |
 
 ## Commands
 
@@ -239,7 +257,7 @@ pnpm build
 `pnpm dev` runs the desktop app from a debug build, `pnpm bundle` produces the
 installer, `pnpm test` runs the reference API and MCP test suites, and
 `pnpm build` compiles the dashboard bundle, the TypeScript API, and the MCP
-server. Cursor Agent chat needs that MCP `dist` before it can spawn the server.
+server. `pnpm --filter @token-tracker/mcp run package` writes the release zip.
 
 There is no development web server. The dashboard is a static bundle compiled
 into the app, so `apps/web` is built rather than served, and nothing listens on
@@ -264,11 +282,12 @@ version number, so nothing needs editing by hand beforehand.
 
 It writes the new version into `apps/desktop/src-tauri/tauri.conf.json`,
 `apps/desktop/src-tauri/Cargo.toml`, `apps/desktop/package.json`,
-`apps/vscode/package.json` and `apps/desktop/src-tauri/Cargo.lock` together, runs
-both test suites, builds the universal macOS bundle and the extension, and only
-then commits the bump, tags it `v<version>`, pushes the commit and the tag, and
-publishes the release with `Token-Tracker-<version>-universal.dmg` and
-`Token-Tracker-<version>.vsix` attached.
+`apps/vscode/package.json`, `apps/mcp/package.json`, `apps/mcp/src/version.ts`
+and `apps/desktop/src-tauri/Cargo.lock` together, runs both test suites, builds
+the universal macOS bundle, the extension, and the MCP zip, and only then
+commits the bump, tags it `v<version>`, pushes the commit and the tag, and
+publishes the release with `Token-Tracker-<version>-universal.dmg`,
+`Token-Tracker-<version>.vsix`, and `Token-Tracker-<version>-mcp.zip` attached.
 
 The order matters: a failed test or a failed build pushes nothing at all, so the
 repository is never left claiming a version that was never released. Pull

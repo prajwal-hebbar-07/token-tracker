@@ -39,10 +39,16 @@ importers:
       '@token-tracker/api':
         specifier: workspace:*
         version: link:../api
+      '@token-tracker/web':
+        specifier: workspace:*
+        version: link:../web
     devDependencies:
       '@types/node':
         specifier: 26.2.0
         version: 26.2.0
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       tsx:
         specifier: 4.23.12
         version: 4.23.12

@@ -89,6 +89,8 @@ jobs:
           conf=apps/desktop/src-tauri/tauri.conf.json
           pkg=apps/desktop/package.json
           extension=apps/vscode/package.json
+          mcp=apps/mcp/package.json
+          mcp_version=apps/mcp/src/version.ts
           manifest=apps/desktop/src-tauri/Cargo.toml
 
           # Rewriting only the version literal keeps these edits to one line per
@@ -101,18 +103,25 @@ jobs:
           set_json_version "$conf"
           set_json_version "$pkg"
           set_json_version "$extension"
+          set_json_version "$mcp"
+          awk -v v="$NEXT" '/^export const MCP_VERSION = / { print "export const MCP_VERSION = \"" v "\";"; next } { print }' \
+            "$mcp_version" > "$mcp_version.tmp" && mv "$mcp_version.tmp" "$mcp_version"
           awk -v v="$NEXT" '!seen && /^version = / { print "version = \"" v "\""; seen = 1; next } { print }' \
             "$manifest" > "$manifest.tmp" && mv "$manifest.tmp" "$manifest"
 
           # A silently failed edit would publish a mislabelled installer, so each
           # file is read back rather than trusted.
-          for file in "$conf" "$pkg" "$extension"; do
+          for file in "$conf" "$pkg" "$extension" "$mcp"; do
             found="$(jq -r .version "$file")"
             if [ "$found" != "$NEXT" ]; then
               echo "::error::${file} still reads ${found} instead of ${NEXT}."
               exit 1
             fi
           done
+          if ! grep -qx "export const MCP_VERSION = \"${NEXT}\";" "$mcp_version"; then
+            echo "::error::${mcp_version} was not rewritten to ${NEXT}."
+            exit 1
+          fi
           if ! grep -qx "version = \"${NEXT}\"" "$manifest"; then
             echo "::error::${manifest} was not rewritten to ${NEXT}."
             exit 1
@@ -168,12 +177,24 @@ jobs:
           echo "path=dist/${name}" >> "$GITHUB_OUTPUT"
           echo "name=${name}" >> "$GITHUB_OUTPUT"
 
+      - name: Package the MCP server
+        id: mcp
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
+        run: |
+          pnpm --filter @token-tracker/mcp run package
+          name="Token-Tracker-${NEXT}-mcp.zip"
+          mv "apps/mcp/${name}" "dist/${name}"
+          echo "path=dist/${name}" >> "$GITHUB_OUTPUT"
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/upload-artifact@v7
         with:
           name: token-tracker-${{ steps.version.outputs.next }}
           path: |
             ${{ steps.installer.outputs.path }}
             ${{ steps.extension.outputs.path }}
+            ${{ steps.mcp.outputs.path }}
           if-no-files-found: error
 
       # Everything below only runs once the tests and the build have passed, so a
@@ -193,7 +214,9 @@ jobs:
             apps/desktop/src-tauri/Cargo.toml \
             apps/desktop/src-tauri/Cargo.lock \
             apps/desktop/package.json \
-            apps/vscode/package.json
+            apps/vscode/package.json \
+            apps/mcp/package.json \
+            apps/mcp/src/version.ts
           git commit -m "chore(release): ${TAG}"
           git tag "$TAG"
           git push origin "HEAD:${BRANCH}"
@@ -208,6 +231,7 @@ jobs:
           files: |
             ${{ steps.installer.outputs.path }}
             ${{ steps.extension.outputs.path }}
+            ${{ steps.mcp.outputs.path }}
           fail_on_unmatched_files: true
           generate_release_notes: true
           body: |
@@ -228,3 +252,15 @@ jobs:
             ```bash
             code --install-extension ${{ steps.extension.outputs.name }}
             ```
+
+            ### Cursor Agent (MCP)
+
+            `${{ steps.mcp.outputs.name }}` is the same dashboard for Agent chat and the Agents window Browser pane. It needs Node.js 22.5+. Unzip it and run the installer, then reload MCP from **Customize** in Cursor:
+
+            ```bash
+            unzip ${{ steps.mcp.outputs.name }}
+            cd token-tracker-mcp
+            node install.js
+            ```
+
+            Uninstall with `node ~/.token-tracker/mcp/install.js --uninstall`.

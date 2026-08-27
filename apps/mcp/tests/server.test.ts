@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { openTrackerDatabase, saveLimitsSnapshot } from "@token-tracker/api/dist/db.js";
+import { stopDashboard } from "../src/host.js";
 import { dispatch } from "../src/server.js";
 
 function toolText(response: Awaited<ReturnType<typeof dispatch>>): string {
@@ -34,7 +35,7 @@ test("initialize echoes the client's protocol version and lists the usage tools"
     const listed = await dispatch(tracker, { id: 2, method: "tools/list" });
     assert.ok(listed && "result" in listed);
     const names = (listed.result as { tools: Array<{ name: string }> }).tools.map((tool) => tool.name);
-    assert.deepEqual(names, ["refresh_usage", "get_usage"]);
+    assert.deepEqual(names, ["refresh_usage", "get_usage", "open_dashboard"]);
   } finally {
     tracker.close();
     rmSync(directory, { recursive: true, force: true });
@@ -117,6 +118,42 @@ test("get_usage rejects an invalid period as a tool error", async () => {
     assert.equal(result.isError, true);
     assert.match(result.content[0]?.text ?? "", /period must be/);
   } finally {
+    tracker.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("open_dashboard serves the visual dashboard on loopback", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "token-tracker-mcp-"));
+  const bundle = join(directory, "web");
+  mkdirSync(bundle);
+  writeFileSync(join(bundle, "index.html"), "<!doctype html><title>Token Tracker</title>");
+  const tracker = openTrackerDatabase(join(directory, "tracker.sqlite"));
+  const previousWeb = process.env.TOKEN_TRACKER_WEB;
+  const previousPort = process.env.TOKEN_TRACKER_PORT;
+  process.env.TOKEN_TRACKER_WEB = bundle;
+  process.env.TOKEN_TRACKER_PORT = "0";
+  try {
+    const response = await dispatch(tracker, {
+      id: 5,
+      method: "tools/call",
+      params: { name: "open_dashboard", arguments: {} },
+    });
+    const text = toolText(response);
+    const match = text.match(/Dashboard: (http:\/\/127\.0\.0\.1:\d+)/);
+    assert.ok(match);
+    const url = match[1]!;
+    const page = await fetch(url);
+    assert.equal(page.status, 200);
+    assert.match(await page.text(), /Token Tracker/);
+    const health = await fetch(new URL("/health", url));
+    assert.equal(health.status, 200);
+  } finally {
+    stopDashboard();
+    if (previousWeb === undefined) delete process.env.TOKEN_TRACKER_WEB;
+    else process.env.TOKEN_TRACKER_WEB = previousWeb;
+    if (previousPort === undefined) delete process.env.TOKEN_TRACKER_PORT;
+    else process.env.TOKEN_TRACKER_PORT = previousPort;
     tracker.close();
     rmSync(directory, { recursive: true, force: true });
   }

@@ -1,12 +1,14 @@
 {
   "name": "@token-tracker/mcp",
   "private": true,
+  "version": "1.2.0",
   "type": "module",
   "bin": {
     "token-tracker-mcp": "./dist/server.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node -e \"const fs = require('node:fs'); fs.rmSync('dist/web', { force: true, recursive: true }); fs.cpSync('../web/out', 'dist/web', { recursive: true })\"",
+    "package": "node scripts/package.mjs",
     "start": "node dist/server.js",
     "test": "tsx --test tests/*.test.ts"
   },
@@ -14,10 +16,12 @@
     "node": ">=22.5.0"
   },
   "dependencies": {
-    "@token-tracker/api": "workspace:*"
+    "@token-tracker/api": "workspace:*",
+    "@token-tracker/web": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "26.2.0",
+    "esbuild": "0.28.2",
     "tsx": "4.23.12",
     "typescript": "7.0.2"
   }

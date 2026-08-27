@@ -9,6 +9,8 @@ apps/desktop/src-tauri/gen/
 *.tsbuildinfo
 apps/api/data/
 apps/vscode/media/
+apps/mcp/pack/
+apps/mcp/Token-Tracker-*-mcp.zip
 *.vsix
 .env
 .env.local
