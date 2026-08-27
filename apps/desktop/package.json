@@ -1,7 +1,7 @@
 {
   "name": "@token-tracker/desktop",
   "private": true,
-  "version": "1.2.0",
+  "version": "1.3.0",
   "scripts": {
     "bundle": "tauri build",
     "dev": "tauri dev",
