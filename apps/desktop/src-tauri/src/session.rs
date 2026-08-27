@@ -146,6 +146,30 @@ pub fn read_session_file(session_file: &str) -> SessionFile {
     file
 }
 
+static TIMESTAMP_WRAPPER: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)<timestamp>.*?</timestamp>").unwrap());
+static USER_QUERY_WRAPPER: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)</?user_query>").unwrap());
+static WHITESPACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").unwrap());
+
+/// Strips Cursor chat wrappers and matches the same category rules used for
+/// Oh My Pi transcripts, so both sources land in one breakdown.
+pub fn classify_user_text(text: &str) -> String {
+    let without_timestamp = TIMESTAMP_WRAPPER.replace_all(text, " ");
+    let without_query = USER_QUERY_WRAPPER.replace_all(&without_timestamp, " ");
+    let cleaned = WHITESPACE.replace_all(&without_query, " ");
+    let cleaned = cleaned.trim();
+    if cleaned.is_empty() {
+        return DEFAULT_CATEGORY.to_string();
+    }
+    for (category, pattern) in CATEGORY_RULES.iter() {
+        if pattern.is_match(cleaned) {
+            return (*category).to_string();
+        }
+    }
+    DEFAULT_CATEGORY.to_string()
+}
+
 /// Walks from an entry towards the root until a user message is found. The depth
 /// bound is the node count, so a transcript whose parent links form a cycle ends
 /// on the default rather than spinning.
@@ -160,12 +184,7 @@ pub fn classify_entry(entry_id: &str, nodes: &HashMap<String, SessionNode>) -> S
         // An empty string is not intent: keep climbing, matching the original's
         // truthiness check rather than merely testing for presence.
         if let Some(text) = node.user_text.as_deref().filter(|text| !text.is_empty()) {
-            for (category, pattern) in CATEGORY_RULES.iter() {
-                if pattern.is_match(text) {
-                    return (*category).to_string();
-                }
-            }
-            return DEFAULT_CATEGORY.to_string();
+            return classify_user_text(text);
         }
         current = node
             .parent_id

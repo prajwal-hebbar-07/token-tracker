@@ -1,7 +1,7 @@
 {
   "name": "token-tracker",
   "displayName": "Token Tracker",
-  "description": "Local Oh My Pi token usage, spend and provider quotas in a VS Code panel",
+  "description": "Local Oh My Pi and Cursor token usage, spend and provider quotas in a VS Code panel",
   "publisher": "prajwal-hebbar-07",
   "version": "1.1.0",
   "repository": {

@@ -1,12 +1,20 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { DatabaseSync } from "node:sqlite";
 import {
+  fetchCursorLimits,
+  fetchCursorUsageEvents,
+  indexCursorConversations,
+} from "./cursor.js";
+import {
+  cursorWatermark,
   getDashboard,
   getModels,
   getProjects,
   type ImportResult,
+  importFromCursor,
   importFromOmp,
   isDashboardPeriod,
+  overlayProviderLimits,
   readPreferences,
   saveLimitsSnapshot,
   savePreferences,
@@ -67,9 +75,9 @@ export async function handleApiRequest(
 
     if (request.method === "POST" && url.pathname === "/api/import") {
       const stage = url.searchParams.get("stage");
-      const validStages = ["sessions", "usage", "limits"];
+      const validStages = ["sessions", "usage", "cursor", "limits"];
       if (stage !== null && !validStages.includes(stage)) {
-        sendJson(response, 400, { error: "stage must be sessions, usage, or limits" });
+        sendJson(response, 400, { error: "stage must be sessions, usage, cursor, or limits" });
         return true;
       }
 
@@ -85,23 +93,37 @@ export async function handleApiRequest(
         try {
           result = importFromOmp(tracker);
         } catch (error) {
-          if (stage !== null) {
-            const message = error instanceof Error ? error.message : "Import failed";
-            throw new Error(message);
-          }
-          // In the full-run path, preserve the original behavior of including the
-          // session-sync warning when the usage import fails.
-          const syncWarning = warnings[0];
-          if (!syncWarning) throw error;
           const message = error instanceof Error ? error.message : "Import failed";
-          throw new Error(`${message} (session sync also failed: ${syncWarning})`);
+          warnings.push(message);
+        }
+      }
+
+      if (stage === null || stage === "cursor") {
+        try {
+          const fetched = await fetchCursorUsageEvents(cursorWatermark(tracker));
+          if (fetched.warning) warnings.push(fetched.warning);
+          if (fetched.events.length > 0) {
+            result = importFromCursor(tracker, fetched.events, indexCursorConversations());
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Could not import Cursor usage";
+          warnings.push(message);
         }
       }
 
       if (stage === null || stage === "limits") {
         const limits = await readProviderLimits();
         if (limits.warning) warnings.push(limits.warning);
-        if (limits.snapshot) saveLimitsSnapshot(tracker, limits.snapshot);
+        let snapshot = limits.snapshot;
+        try {
+          const cursor = await fetchCursorLimits();
+          if (cursor.warning) warnings.push(cursor.warning);
+          if (cursor.report) snapshot = overlayProviderLimits(tracker, snapshot, cursor.report);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Could not read Cursor limits";
+          warnings.push(message);
+        }
+        if (snapshot) saveLimitsSnapshot(tracker, snapshot);
       }
 
       sendJson(response, 200, { result, warnings, dashboard: getDashboard(tracker) });

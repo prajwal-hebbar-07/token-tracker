@@ -114,13 +114,14 @@ function limitTone(quota: { status: string; usedFraction: number | null }): stri
   return used >= 0.7 ? "warn" : "safe";
 }
 
-type ImportStage = "sessions" | "usage" | "limits";
+type ImportStage = "sessions" | "usage" | "cursor" | "limits";
 type StageStatus = { state: "idle" | "loading" | "done" | "error"; message: string | null };
 
-const STAGE_ORDER: ImportStage[] = ["sessions", "usage", "limits"];
+const STAGE_ORDER: ImportStage[] = ["sessions", "usage", "cursor", "limits"];
 const STAGE_LABEL: Record<ImportStage, string> = {
   sessions: "Sync Oh My Pi sessions",
-  usage: "Import usage",
+  usage: "Import Oh My Pi usage",
+  cursor: "Import Cursor usage",
   limits: "Read provider limits",
 };
 
@@ -279,6 +280,7 @@ export default function DashboardPage() {
   const [stages, setStages] = useState<Record<ImportStage, StageStatus>>({
     sessions: { state: "idle", message: null },
     usage: { state: "idle", message: null },
+    cursor: { state: "idle", message: null },
     limits: { state: "idle", message: null },
   });
 
@@ -286,6 +288,7 @@ export default function DashboardPage() {
     setStages({
       sessions: { state: "idle", message: null },
       usage: { state: "idle", message: null },
+      cursor: { state: "idle", message: null },
       limits: { state: "idle", message: null },
     });
   }, []);
@@ -363,7 +366,7 @@ export default function DashboardPage() {
         setStage(stage, { state: "done", message: null });
         // Refresh the dashboard and model matrix as soon as usage lands so the
         // numbers appear incrementally instead of waiting for the whole pipeline.
-        if (stage === "usage") {
+        if (stage === "usage" || stage === "cursor") {
           setDashboard(await loadDashboard());
           setModelsReport(await loadModels());
         }
@@ -374,10 +377,10 @@ export default function DashboardPage() {
       failedStage = null;
       setWarnings(accumulatedWarnings);
       if (accumulatedWarnings.length === 0) {
-        setNotice("Oh My Pi sessions synced, limits refreshed, usage imported.");
+        setNotice("Oh My Pi and Cursor usage imported, limits refreshed.");
       }
     } catch (reason) {
-      const message = reason instanceof Error ? reason.message : "Could not import Oh My Pi usage";
+      const message = reason instanceof Error ? reason.message : "Could not import usage";
       if (failedStage !== null) {
         setStage(failedStage, { state: "error", message });
       }
@@ -388,7 +391,7 @@ export default function DashboardPage() {
   }, [loadDashboard, loadModels, resetStages, setStage]);
 
   // Opening the app imports once on its own, so what is on screen is what Oh My
-  // Pi has recorded without the button having to be pressed. Every later refresh
+  // Pi and Cursor have recorded without the button having to be pressed. Every later refresh
   // stays manual. The flag lives outside the component, so a period change or a
   // return from the projects page re-runs this effect without re-importing.
   useEffect(() => {
@@ -460,7 +463,7 @@ export default function DashboardPage() {
               : "Not fetched yet"}
           </div>
           <button className="fetchButton" type="button" onClick={fetchUsage} disabled={loading || importing}>
-            {importing ? "Fetching…" : "Fetch Oh My Pi data"}
+            {importing ? "Fetching…" : "Fetch usage"}
           </button>
         </div>
       </header>
@@ -498,7 +501,7 @@ export default function DashboardPage() {
         <section className="emptyState">
           <p className="emptyKicker">NO USAGE THIS PERIOD</p>
           <h2>No usage recorded for {periodLabel(period)}.</h2>
-          <p>Fetch reads <code>~/.omp/stats.db</code> and updates the saved snapshot in this app.</p>
+          <p>Fetch reads Oh My Pi and the signed-in Cursor account, then updates the saved snapshot in this app.</p>
           <button className="fetchButton large" type="button" onClick={fetchUsage} disabled={importing}>
             {importing ? "Fetching…" : "Fetch usage now"}
           </button>
@@ -522,7 +525,7 @@ export default function DashboardPage() {
               </p>
             </div>
             <div className="heroNote">
-              Oh My Pi recorded costs are used when available. MiniMax-M3, Kimi K2.6, and Kimi K3 are billed as free by Ollama Cloud, so they are estimated from official standard pay-as-you-go rates; MiniMax rates double above 512k input tokens.
+              Oh My Pi recorded costs are used when available. Cursor events use the amounts Cursor billed. MiniMax-M3, Kimi K2.6, and Kimi K3 are billed as free by Ollama Cloud, so they are estimated from official standard pay-as-you-go rates; MiniMax rates double above 512k input tokens.
             </div>
           </section>
 

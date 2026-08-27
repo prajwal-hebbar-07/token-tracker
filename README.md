@@ -1,9 +1,9 @@
 # Token Tracker
 
-Local dashboard for importing Oh My Pi usage, storing it in SQLite, and showing
-what each model actually costs alongside the remaining quota on every
-authenticated provider account. Shipped as a single-file installer that starts
-its own local API and serves the dashboard from inside the binary.
+Local dashboard for importing Oh My Pi usage and Cursor usage, storing it in
+SQLite, and showing what each model actually costs alongside the remaining quota
+on every authenticated provider account. Shipped as a single-file installer that
+starts its own local API and serves the dashboard from inside the binary.
 
 ## Install the desktop app
 
@@ -74,9 +74,9 @@ embedded in the binary, answers `/api/*` from the same origin so the interface
 needs no separate backend, and then opens a native window on that address.
 
 Opening the app imports once on its own, so the dashboard shows what Oh My Pi
-has recorded without anything having to be pressed. That is the only automatic
-run: there is no polling and no background sync, and every later refresh is the
-**Fetch Oh My Pi data** button.
+and the signed-in Cursor account have recorded without anything having to be
+pressed. That is the only automatic run: there is no polling and no background
+sync, and every later refresh is the **Fetch usage** button.
 
 The VS Code extension is the same arrangement one layer up: the extension host
 binds the loopback server itself — reusing the TypeScript API in `apps/api`
@@ -86,23 +86,27 @@ calls reach the extension's server unchanged.
 
 ## Using the dashboard
 
-Opening the installed app runs one import by itself, and **Fetch Oh My Pi data**
-runs the same three steps again on demand:
+Opening the installed app runs one import by itself, and **Fetch usage**
+runs the same four steps again on demand:
 
 1. Runs `omp stats --json`, which tails `~/.omp/agent/sessions/` into
    `~/.omp/stats.db`. Nothing else advances that database, so skipping this step
    would re-import whatever snapshot the last `omp stats` run left behind.
-2. Imports the refreshed database into this app's own SQLite file.
-3. Runs `omp usage --json`, then fills the Ollama Cloud report from
-   `https://ollama.com/api/usage`, and stores the resulting account limits.
+2. Imports the refreshed Oh My Pi database into this app's own SQLite file.
+3. Imports Cursor usage events from the signed-in Cursor account on this
+   machine, matching them to local chats so project and category totals stay in
+   the same reports.
+4. Runs `omp usage --json`, fills the Ollama Cloud report from
+   `https://ollama.com/api/usage`, reads Cursor's current billing cycle, and
+   stores the resulting account limits.
 
-If either `omp` call fails the import still completes — with the existing stats
-snapshot, and with the previously stored limits — and the dashboard shows a
-warning instead of pretending the data is current.
+If an `omp` call fails, or Cursor is not signed in, the import still completes
+with whatever sources did answer — and the dashboard shows a warning instead of
+pretending the data is current.
 
-Rows from models Ollama Cloud bills as free are estimated from the provider's
-published pay-as-you-go rates, so the spend they would have cost is still
-visible. [MiniMax-M3](https://platform.minimax.io/docs/guides/pricing-paygo):
+Cursor events use the amounts Cursor billed. Rows from models Ollama Cloud bills
+as free are estimated from the provider's published pay-as-you-go rates, so the
+spend they would have cost is still visible. [MiniMax-M3](https://platform.minimax.io/docs/guides/pricing-paygo):
 $0.30 input, $1.20 output, and $0.06 cache-read per million tokens up to 512k
 input tokens, with those rates doubling for longer inputs.
 [Kimi K2.6](https://platform.kimi.ai/docs/pricing/chat-k26): $0.95 input, $4.00
@@ -167,10 +171,12 @@ so installing both leaves each with its own copy.
 
 Account limits come from each provider rather than from estimates based on
 local token counts. Oh My Pi supplies the supported providers; Ollama Cloud's
-session and weekly percentages come from its account usage endpoint. Token
+session and weekly percentages come from its account usage endpoint; Cursor's
+included usage and spend limit come from the signed-in Cursor account. Token
 Tracker uses `OLLAMA_API_KEY` when set, otherwise the enabled `ollama-cloud`
 credential in Oh My Pi's agent database. Ollama does not currently return reset
-timestamps.
+timestamps. Cursor auth is read from the local Cursor session (or
+`CURSOR_API_KEY` / `CURSOR_ACCESS_TOKEN` when set).
 
 ## Configuration
 
@@ -181,6 +187,9 @@ timestamps.
 | `OMP_BIN` | `omp` | Oh My Pi binary used for the session sync and usage limits |
 | `OMP_AGENT_DB` | `~/.omp/agent/agent.db` | Oh My Pi credential database used for Ollama Cloud |
 | `OLLAMA_API_KEY` | Oh My Pi credential | Optional Ollama Cloud API-key override |
+| `CURSOR_API_KEY` | Cursor session | Optional Cursor user API key (`crsr_...`) |
+| `CURSOR_ACCESS_TOKEN` | Cursor session | Optional Cursor session token override |
+| `CURSOR_STATE_DB` | Cursor `state.vscdb` | Cursor IDE state database used for the session token |
 | `TOKEN_TRACKER_PORT` | ephemeral | Desktop app loopback port; `0` picks any free port |
 
 ## Commands

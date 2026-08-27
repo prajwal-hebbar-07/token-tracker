@@ -16,11 +16,13 @@ use regex::Regex;
 use rusqlite::types::ValueRef;
 use rusqlite::{params, Connection, OpenFlags};
 
+use crate::cursor::{cursor_event_id, cursor_session_file, CursorConversation, CursorEvent};
 use crate::model::{
     CategorySpend, Dashboard, ImportResult, LastSync, LimitsSnapshot, ModelSpend, ModelsReport, Period,
-    Preferences, Project, ProjectModel, ProjectModelTotal, ProjectTotals, ProjectsReport, Summary,
+    Preferences, Project, ProjectModel, ProjectModelTotal, ProjectTotals, ProjectsReport, ProviderLimits,
+    Summary,
 };
-use crate::session::{classify_entry, read_session_file, SessionFile, DEFAULT_CATEGORY};
+use crate::session::{classify_entry, classify_user_text, read_session_file, SessionFile, DEFAULT_CATEGORY};
 
 /// Published pay-as-you-go rates for models a provider hands out for free, so a
 /// zero-cost row still shows what it would have cost. Ollama Cloud reports no
@@ -1127,6 +1129,132 @@ impl Store {
             },
             models,
             projects,
+        })
+    }
+
+    pub fn cursor_watermark(&self) -> Result<Option<i64>> {
+        let mut statement = self.connection.prepare(
+            "SELECT MAX(timestamp) AS timestamp FROM usage_messages WHERE provider = 'cursor'",
+        )?;
+        let mut rows = statement.query([])?;
+        let Some(row) = rows.next()? else {
+            return Ok(None);
+        };
+        let Some(timestamp) = loose_opt_i64(row.get_ref(0)?) else {
+            return Ok(None);
+        };
+        const LOOKBACK_MS: i64 = 2 * 60 * 60 * 1000;
+        Ok(Some((timestamp - LOOKBACK_MS).max(0)))
+    }
+
+    pub fn import_from_cursor(
+        &self,
+        events: &[CursorEvent],
+        conversations: &HashMap<String, CursorConversation>,
+    ) -> Result<ImportResult> {
+        let started_at = now_millis();
+        let existing_by_key = self.read_existing_rows()?;
+        let mut rows: Vec<SourceRow> = Vec::new();
+        for event in events {
+            let session_file = cursor_session_file(event);
+            let entry_id = cursor_event_id(event);
+            let existing = existing_by_key.get(&(session_file.clone(), entry_id.clone()));
+            let conversation = event
+                .conversation_id
+                .as_ref()
+                .and_then(|id| conversations.get(id));
+            let total_tokens = event.input_tokens
+                + event.output_tokens
+                + event.cache_read_tokens
+                + event.cache_write_tokens;
+            let category = existing
+                .map(|(category, _)| category.clone())
+                .or_else(|| {
+                    conversation
+                        .and_then(|entry| entry.user_text.as_deref())
+                        .map(classify_user_text)
+                })
+                .unwrap_or_else(|| DEFAULT_CATEGORY.to_string());
+            let project_path = existing
+                .and_then(|(_, path)| path.clone())
+                .or_else(|| conversation.and_then(|entry| entry.path.clone()));
+            rows.push(SourceRow {
+                session_file,
+                entry_id,
+                folder: conversation
+                    .map(|entry| entry.folder.clone())
+                    .unwrap_or_else(|| "cursor".to_string()),
+                model: event.model.clone(),
+                provider: "cursor".to_string(),
+                api: "cursor".to_string(),
+                timestamp: event.timestamp,
+                duration: None,
+                ttft: None,
+                stop_reason: event.kind.clone(),
+                error_message: None,
+                input_tokens: event.input_tokens,
+                output_tokens: event.output_tokens,
+                cache_read_tokens: event.cache_read_tokens,
+                cache_write_tokens: event.cache_write_tokens,
+                total_tokens,
+                premium_requests: event.requests_costs,
+                cost_input: 0.0,
+                cost_output: 0.0,
+                cost_cache_read: 0.0,
+                cost_cache_write: 0.0,
+                cost_total: event.charged_cents / 100.0,
+                agent_type: if event.is_headless {
+                    "headless".to_string()
+                } else {
+                    "main".to_string()
+                },
+                cost_no_cache_input: None,
+                category,
+                project_path,
+            });
+        }
+        let before = self.count_usage_messages()?;
+        self.connection.execute_batch("BEGIN IMMEDIATE")?;
+        match self.write_rows(&rows, started_at, Path::new("cursor://dashboard"), before) {
+            Ok(result) => {
+                self.connection.execute_batch("COMMIT")?;
+                Ok(result)
+            }
+            Err(error) => {
+                self.connection.execute_batch("ROLLBACK")?;
+                Err(error)
+            }
+        }
+    }
+
+    pub fn overlay_provider_limits(
+        &self,
+        snapshot: Option<LimitsSnapshot>,
+        report: ProviderLimits,
+    ) -> Result<LimitsSnapshot> {
+        let captured_at = snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.captured_at)
+            .unwrap_or_else(|| now_millis() as f64);
+        let mut generated_at = snapshot.as_ref().and_then(|snapshot| snapshot.generated_at);
+        let previous = match snapshot {
+            Some(snapshot) => Some(snapshot),
+            None => self.read_limits_snapshot()?,
+        };
+        if generated_at.is_none() {
+            generated_at = previous.as_ref().and_then(|snapshot| snapshot.generated_at);
+        }
+        let mut providers: Vec<ProviderLimits> = previous
+            .map(|snapshot| snapshot.providers)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|entry| entry.provider != report.provider)
+            .collect();
+        providers.push(report);
+        Ok(LimitsSnapshot {
+            captured_at,
+            generated_at,
+            providers,
         })
     }
 }

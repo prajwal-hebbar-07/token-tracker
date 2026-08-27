@@ -5,6 +5,7 @@
 //! origin, and then opens a window on that address. Nothing else has to be
 //! started, and no port has to be free in advance.
 
+pub mod cursor;
 pub mod db;
 pub mod model;
 pub mod omp;

@@ -2,7 +2,9 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { LimitsSnapshot } from "./omp-cli.js";
+import type { CursorConversation, CursorUsageEvent } from "./cursor.js";
+import { cursorEventId, cursorSessionFile } from "./cursor.js";
+import type { LimitsSnapshot, ProviderLimits } from "./omp-cli.js";
 
 export interface ImportResult {
   sourcePath: string;
@@ -297,15 +299,23 @@ function readSessionFile(sessionFile: string): SessionFile {
   return { cwd, nodes };
 }
 
+export function classifyUserText(text: string): UsageCategory {
+  const cleaned = text
+    .replace(/<timestamp>[\s\S]*?<\/timestamp>/gi, " ")
+    .replace(/<\/?user_query>/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (cleaned.length === 0) return "Logic & planning";
+  for (const rule of CATEGORY_RULES) {
+    if (rule.pattern.test(cleaned)) return rule.category;
+  }
+  return "Logic & planning";
+}
+
 function classifyEntry(entryId: string, nodes: Map<string, SessionNode>): UsageCategory {
   let node = nodes.get(entryId);
   for (let depth = 0; node && depth <= nodes.size; depth += 1) {
-    if (node.userText) {
-      for (const rule of CATEGORY_RULES) {
-        if (rule.pattern.test(node.userText)) return rule.category;
-      }
-      return "Logic & planning";
-    }
+    if (node.userText) return classifyUserText(node.userText);
     node = node.parentId ? nodes.get(node.parentId) : undefined;
   }
   return "Logic & planning";
@@ -463,130 +473,226 @@ export function importFromOmp(
         row.project_path = pathByFolder.get(row.folder) ?? null;
       }
     }
-    const beforeRow = tracker.prepare("SELECT COUNT(*) AS count FROM usage_messages").get();
-    if (!beforeRow || typeof beforeRow.count !== "number") {
-      throw new Error("Could not count saved usage records");
-    }
-    const before = beforeRow.count;
-    const upsert = tracker.prepare(`
-      INSERT INTO usage_messages (
-        ${usageColumns}, category, project_path, imported_at
-      ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-      )
-      ON CONFLICT(session_file, entry_id) DO UPDATE SET
-        folder = excluded.folder,
-        model = excluded.model,
-        provider = excluded.provider,
-        api = excluded.api,
-        timestamp = excluded.timestamp,
-        duration = excluded.duration,
-        ttft = excluded.ttft,
-        stop_reason = excluded.stop_reason,
-        error_message = excluded.error_message,
-        input_tokens = excluded.input_tokens,
-        output_tokens = excluded.output_tokens,
-        cache_read_tokens = excluded.cache_read_tokens,
-        cache_write_tokens = excluded.cache_write_tokens,
-        total_tokens = excluded.total_tokens,
-        premium_requests = excluded.premium_requests,
-        cost_input = excluded.cost_input,
-        cost_output = excluded.cost_output,
-        cost_cache_read = excluded.cost_cache_read,
-        cost_cache_write = excluded.cost_cache_write,
-        cost_total = excluded.cost_total,
-        agent_type = excluded.agent_type,
-        cost_no_cache_input = excluded.cost_no_cache_input,
-        category = excluded.category,
-        project_path = excluded.project_path,
-        imported_at = excluded.imported_at
-    `);
-
-    tracker.exec("BEGIN IMMEDIATE");
-    try {
-      for (const row of rows) {
-        let costInput = row.cost_input;
-        let costOutput = row.cost_output;
-        let costCacheRead = row.cost_cache_read;
-        let costCacheWrite = row.cost_cache_write;
-        let costTotal = row.cost_total;
-        let costNoCacheInput = row.cost_no_cache_input;
-
-        const model = row.model.toLowerCase();
-        const estimate = Object.hasOwn(ESTIMATED_PRICES, model) ? ESTIMATED_PRICES[model] : undefined;
-        if (estimate) {
-          const promptTokens = row.input_tokens + row.cache_read_tokens + row.cache_write_tokens;
-          const tierMultiplier =
-            estimate.tierLimit !== null && promptTokens > estimate.tierLimit ? 2 : 1;
-          const inputRate = estimate.inputPerMillion * tierMultiplier;
-          costInput = (row.input_tokens * inputRate) / 1_000_000;
-          costOutput = (row.output_tokens * estimate.outputPerMillion * tierMultiplier) / 1_000_000;
-          costCacheRead =
-            (row.cache_read_tokens * estimate.cacheReadPerMillion * tierMultiplier) / 1_000_000;
-          costCacheWrite = 0;
-          costTotal = costInput + costOutput + costCacheRead;
-          costNoCacheInput = (promptTokens * inputRate) / 1_000_000;
-        }
-
-        upsert.run(
-          row.session_file,
-          row.entry_id,
-          row.folder,
-          row.model,
-          row.provider,
-          row.api,
-          row.timestamp,
-          row.duration,
-          row.ttft,
-          row.stop_reason,
-          row.error_message,
-          row.input_tokens,
-          row.output_tokens,
-          row.cache_read_tokens,
-          row.cache_write_tokens,
-          row.total_tokens,
-          row.premium_requests,
-          costInput,
-          costOutput,
-          costCacheRead,
-          costCacheWrite,
-          costTotal,
-          row.agent_type,
-          costNoCacheInput,
-          row.category ?? "Logic & planning",
-          row.project_path ?? null,
-          startedAt,
-        );
-      }
-
-      const totalRow = tracker.prepare("SELECT COUNT(*) AS count FROM usage_messages").get();
-      if (!totalRow || typeof totalRow.count !== "number") {
-        throw new Error("Could not count imported usage records");
-      }
-      const totalRecords = totalRow.count;
-      const completedAt = Date.now();
-      const newRecords = totalRecords - before;
-      tracker.prepare(`
-        INSERT INTO sync_runs (
-          started_at, completed_at, source_path, source_records, new_records, total_records
-        ) VALUES (?, ?, ?, ?, ?, ?)
-      `).run(startedAt, completedAt, sourcePath, rows.length, newRecords, totalRecords);
-      tracker.exec("COMMIT");
-
-      return {
-        sourcePath,
-        sourceRecords: rows.length,
-        newRecords,
-        totalRecords,
-        completedAt,
-      };
-    } catch (error) {
-      tracker.exec("ROLLBACK");
-      throw error;
-    }
+    return insertUsageRows(tracker, rows, startedAt, sourcePath);
   } finally {
     source.close();
   }
+}
+
+function insertUsageRows(
+  tracker: DatabaseSync,
+  rows: UsageRow[],
+  startedAt: number,
+  sourcePath: string,
+): ImportResult {
+  const beforeRow = tracker.prepare("SELECT COUNT(*) AS count FROM usage_messages").get();
+  if (!beforeRow || typeof beforeRow.count !== "number") {
+    throw new Error("Could not count saved usage records");
+  }
+  const before = beforeRow.count;
+  const upsert = tracker.prepare(`
+    INSERT INTO usage_messages (
+      ${usageColumns}, category, project_path, imported_at
+    ) VALUES (
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    )
+    ON CONFLICT(session_file, entry_id) DO UPDATE SET
+      folder = excluded.folder,
+      model = excluded.model,
+      provider = excluded.provider,
+      api = excluded.api,
+      timestamp = excluded.timestamp,
+      duration = excluded.duration,
+      ttft = excluded.ttft,
+      stop_reason = excluded.stop_reason,
+      error_message = excluded.error_message,
+      input_tokens = excluded.input_tokens,
+      output_tokens = excluded.output_tokens,
+      cache_read_tokens = excluded.cache_read_tokens,
+      cache_write_tokens = excluded.cache_write_tokens,
+      total_tokens = excluded.total_tokens,
+      premium_requests = excluded.premium_requests,
+      cost_input = excluded.cost_input,
+      cost_output = excluded.cost_output,
+      cost_cache_read = excluded.cost_cache_read,
+      cost_cache_write = excluded.cost_cache_write,
+      cost_total = excluded.cost_total,
+      agent_type = excluded.agent_type,
+      cost_no_cache_input = excluded.cost_no_cache_input,
+      category = excluded.category,
+      project_path = excluded.project_path,
+      imported_at = excluded.imported_at
+  `);
+
+  tracker.exec("BEGIN IMMEDIATE");
+  try {
+    for (const row of rows) {
+      let costInput = row.cost_input;
+      let costOutput = row.cost_output;
+      let costCacheRead = row.cost_cache_read;
+      let costCacheWrite = row.cost_cache_write;
+      let costTotal = row.cost_total;
+      let costNoCacheInput = row.cost_no_cache_input;
+
+      const model = row.model.toLowerCase();
+      const estimate = Object.hasOwn(ESTIMATED_PRICES, model) ? ESTIMATED_PRICES[model] : undefined;
+      if (estimate) {
+        const promptTokens = row.input_tokens + row.cache_read_tokens + row.cache_write_tokens;
+        const tierMultiplier =
+          estimate.tierLimit !== null && promptTokens > estimate.tierLimit ? 2 : 1;
+        const inputRate = estimate.inputPerMillion * tierMultiplier;
+        costInput = (row.input_tokens * inputRate) / 1_000_000;
+        costOutput = (row.output_tokens * estimate.outputPerMillion * tierMultiplier) / 1_000_000;
+        costCacheRead =
+          (row.cache_read_tokens * estimate.cacheReadPerMillion * tierMultiplier) / 1_000_000;
+        costCacheWrite = 0;
+        costTotal = costInput + costOutput + costCacheRead;
+        costNoCacheInput = (promptTokens * inputRate) / 1_000_000;
+      }
+
+      upsert.run(
+        row.session_file,
+        row.entry_id,
+        row.folder,
+        row.model,
+        row.provider,
+        row.api,
+        row.timestamp,
+        row.duration,
+        row.ttft,
+        row.stop_reason,
+        row.error_message,
+        row.input_tokens,
+        row.output_tokens,
+        row.cache_read_tokens,
+        row.cache_write_tokens,
+        row.total_tokens,
+        row.premium_requests,
+        costInput,
+        costOutput,
+        costCacheRead,
+        costCacheWrite,
+        costTotal,
+        row.agent_type,
+        costNoCacheInput,
+        row.category ?? "Logic & planning",
+        row.project_path ?? null,
+        startedAt,
+      );
+    }
+
+    const totalRow = tracker.prepare("SELECT COUNT(*) AS count FROM usage_messages").get();
+    if (!totalRow || typeof totalRow.count !== "number") {
+      throw new Error("Could not count imported usage records");
+    }
+    const totalRecords = totalRow.count;
+    const completedAt = Date.now();
+    const newRecords = totalRecords - before;
+    tracker.prepare(`
+      INSERT INTO sync_runs (
+        started_at, completed_at, source_path, source_records, new_records, total_records
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `).run(startedAt, completedAt, sourcePath, rows.length, newRecords, totalRecords);
+    tracker.exec("COMMIT");
+
+    return {
+      sourcePath,
+      sourceRecords: rows.length,
+      newRecords,
+      totalRecords,
+      completedAt,
+    };
+  } catch (error) {
+    tracker.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+const CURSOR_LOOKBACK_MS = 2 * 60 * 60 * 1000;
+
+export function lastCursorTimestamp(tracker: DatabaseSync): number | null {
+  const row = tracker.prepare(
+    "SELECT MAX(timestamp) AS timestamp FROM usage_messages WHERE provider = 'cursor'",
+  ).get();
+  if (!row || typeof row.timestamp !== "number") return null;
+  return row.timestamp;
+}
+
+export function cursorWatermark(tracker: DatabaseSync): number | null {
+  const timestamp = lastCursorTimestamp(tracker);
+  return timestamp === null ? null : Math.max(0, timestamp - CURSOR_LOOKBACK_MS);
+}
+
+export function importFromCursor(
+  tracker: DatabaseSync,
+  events: CursorUsageEvent[],
+  conversations: Map<string, CursorConversation> = new Map(),
+): ImportResult {
+  const startedAt = Date.now();
+  const existingByKey = new Map<string, { category: UsageCategory; project_path: string | null }>();
+  const existingRows = tracker.prepare(
+    "SELECT session_file, entry_id, category, project_path FROM usage_messages WHERE provider = 'cursor'",
+  ).all() as Array<{ session_file: string; entry_id: string; category: UsageCategory; project_path: string | null }>;
+  for (const row of existingRows) {
+    existingByKey.set(`${row.session_file}\0${row.entry_id}`, {
+      category: row.category,
+      project_path: row.project_path,
+    });
+  }
+
+  const rows: UsageRow[] = events.map((event) => {
+    const sessionFile = cursorSessionFile(event);
+    const entryId = cursorEventId(event);
+    const existing = existingByKey.get(`${sessionFile}\0${entryId}`);
+    const conversation = event.conversationId ? conversations.get(event.conversationId) : undefined;
+    const totalTokens = event.inputTokens + event.outputTokens + event.cacheReadTokens + event.cacheWriteTokens;
+    const costTotal = event.chargedCents / 100;
+    return {
+      session_file: sessionFile,
+      entry_id: entryId,
+      folder: conversation?.folder ?? "cursor",
+      model: event.model,
+      provider: "cursor",
+      api: "cursor",
+      timestamp: event.timestamp,
+      duration: null,
+      ttft: null,
+      stop_reason: event.kind,
+      error_message: null,
+      input_tokens: event.inputTokens,
+      output_tokens: event.outputTokens,
+      cache_read_tokens: event.cacheReadTokens,
+      cache_write_tokens: event.cacheWriteTokens,
+      total_tokens: totalTokens,
+      premium_requests: event.requestsCosts,
+      cost_input: 0,
+      cost_output: 0,
+      cost_cache_read: 0,
+      cost_cache_write: 0,
+      cost_total: costTotal,
+      agent_type: event.isHeadless ? "headless" : "main",
+      cost_no_cache_input: null,
+      category: existing?.category ?? (conversation?.userText ? classifyUserText(conversation.userText) : "Logic & planning"),
+      project_path: existing?.project_path ?? conversation?.path ?? null,
+    };
+  });
+
+  return insertUsageRows(tracker, rows, startedAt, "cursor://dashboard");
+}
+
+export function overlayProviderLimits(
+  tracker: DatabaseSync,
+  snapshot: LimitsSnapshot | null,
+  report: ProviderLimits,
+): LimitsSnapshot {
+  const previous = snapshot ?? readLimitsSnapshot(tracker);
+  const providers = (previous?.providers ?? []).filter((entry) => entry.provider !== report.provider);
+  providers.push(report);
+  return {
+    capturedAt: snapshot?.capturedAt ?? Date.now(),
+    generatedAt: snapshot?.generatedAt ?? previous?.generatedAt ?? null,
+    providers,
+  };
 }
 
 function numberOrZero(value: number | null): number {

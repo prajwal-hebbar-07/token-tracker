@@ -12,6 +12,7 @@ use serde::Serialize;
 use serde_json::json;
 use tiny_http::{Header, Method, Request, Response, Server};
 
+use crate::cursor::{fetch_cursor_limits, fetch_cursor_usage_events, index_cursor_conversations};
 use crate::db::{now_millis, omp_stats_path, Store};
 use crate::model::{Period, Preferences};
 use crate::omp::{read_provider_limits, sync_omp_sessions};
@@ -150,35 +151,80 @@ fn period_from(query: Option<&str>) -> Option<Period> {
     Period::parse(value)
 }
 
+fn import_stage(query: Option<&str>) -> Option<Option<&'static str>> {
+    let value = query.and_then(|query| {
+        query.split('&').find_map(|pair| {
+            let (key, value) = pair.split_once('=')?;
+            (key == "stage").then_some(value)
+        })
+    });
+    match value {
+        None => Some(None),
+        Some("sessions") => Some(Some("sessions")),
+        Some("usage") => Some(Some("usage")),
+        Some("cursor") => Some(Some("cursor")),
+        Some("limits") => Some(Some("limits")),
+        Some(_) => None,
+    }
+}
+
 /// Runs the import exactly as the API did: a failed session sync still imports
 /// the existing snapshot, and a failed limits read keeps the stored one.
-fn import_reply(store: &Store) -> Reply {
-    let mut warnings: Vec<String> = Vec::new();
-    let sync_warning = sync_omp_sessions();
-    if let Some(warning) = &sync_warning {
-        warnings.push(warning.clone());
-    }
-
-    let result = match store.import_from_omp(&omp_stats_path()) {
-        Ok(result) => result,
-        Err(error) => {
-            return match &sync_warning {
-                None => Reply::error(500, error.to_string()),
-                Some(warning) => Reply::error(
-                    500,
-                    format!("{error} (session sync also failed: {warning})"),
-                ),
-            };
-        }
+fn import_reply(store: &Store, query: Option<&str>) -> Reply {
+    let Some(stage) = import_stage(query) else {
+        return Reply::error(400, "stage must be sessions, usage, cursor, or limits");
     };
+    let mut warnings: Vec<String> = Vec::new();
+    let mut result = None;
 
-    let (snapshot, warning) = read_provider_limits();
-    if let Some(warning) = warning {
-        warnings.push(warning);
+    if stage.is_none() || stage == Some("sessions") {
+        if let Some(warning) = sync_omp_sessions() {
+            warnings.push(warning);
+        }
     }
-    if let Some(snapshot) = &snapshot {
-        if let Err(error) = store.save_limits_snapshot(snapshot) {
-            return Reply::error(500, error.to_string());
+
+    if stage.is_none() || stage == Some("usage") {
+        match store.import_from_omp(&omp_stats_path()) {
+            Ok(imported) => result = Some(imported),
+            Err(error) => warnings.push(error.to_string()),
+        }
+    }
+
+    if stage.is_none() || stage == Some("cursor") {
+        let watermark = store.cursor_watermark().ok().flatten();
+        let (events, warning) = fetch_cursor_usage_events(watermark);
+        if let Some(warning) = warning {
+            warnings.push(warning);
+        }
+        if !events.is_empty() {
+            let conversations = index_cursor_conversations();
+            match store.import_from_cursor(&events, &conversations) {
+                Ok(imported) => result = Some(imported),
+                Err(error) => warnings.push(error.to_string()),
+            }
+        }
+    }
+
+    if stage.is_none() || stage == Some("limits") {
+        let (snapshot, warning) = read_provider_limits();
+        if let Some(warning) = warning {
+            warnings.push(warning);
+        }
+        let mut snapshot = snapshot;
+        let (cursor_report, cursor_warning) = fetch_cursor_limits();
+        if let Some(warning) = cursor_warning {
+            warnings.push(warning);
+        }
+        if let Some(report) = cursor_report {
+            match store.overlay_provider_limits(snapshot.clone(), report) {
+                Ok(merged) => snapshot = Some(merged),
+                Err(error) => warnings.push(error.to_string()),
+            }
+        }
+        if let Some(snapshot) = &snapshot {
+            if let Err(error) = store.save_limits_snapshot(snapshot) {
+                return Reply::error(500, error.to_string());
+            }
         }
     }
 
@@ -245,7 +291,7 @@ fn api_reply(
                 Err(error) => Reply::error(500, error.to_string()),
             },
         },
-        (Method::Post, "/api/import") => import_reply(store),
+        (Method::Post, "/api/import") => import_reply(store, query),
         _ => Reply::error(404, "Not found"),
     }
 }
