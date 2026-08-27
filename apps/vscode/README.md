@@ -21,3 +21,6 @@ activate rather than showing an empty panel.
 Cursor usage is imported from the signed-in Cursor account on this machine. If
 Cursor is installed and logged in, no extra key is required. `CURSOR_API_KEY`
 overrides that session when set.
+
+To ask the same questions from Agent chat without opening this panel, use the
+MCP server in `apps/mcp` (see the root README).

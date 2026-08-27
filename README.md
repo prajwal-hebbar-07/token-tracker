@@ -66,6 +66,31 @@ pnpm --filter ./apps/vscode run package
 
 That writes `apps/vscode/token-tracker.vsix`, which installs the same way.
 
+## Use it from Cursor Agent chat
+
+The same import and reports are also an MCP server, so Agent chat can answer
+spend and quota questions without the desktop app or the editor dashboard.
+
+Build it once (Node 22.5+):
+
+```bash
+pnpm install
+pnpm --filter @token-tracker/mcp build
+```
+
+This repository already has `.cursor/mcp.json`, which points Cursor at
+`apps/mcp/dist/server.js`. For the same tools in every project, copy that file
+to `~/.cursor/mcp.json` and change the script path to the absolute location of
+`apps/mcp/dist/server.js` on this machine. Reload MCP servers from **Customize**
+after the first build.
+
+Ask Agent chat things like "how much have I spent this month?" It will call
+`refresh_usage` then `get_usage`. The server prefers the desktop app's SQLite
+file when that exists, otherwise it uses `~/.token-tracker/token-tracker.sqlite`.
+
+This is local stdio MCP: it runs on this machine next to your Cursor session.
+Cloud / background agents cannot read that database.
+
 ## How it works
 
 The desktop app is a single binary. On launch it binds a loopback HTTP server
@@ -83,6 +108,10 @@ binds the loopback server itself — reusing the TypeScript API in `apps/api`
 rather than the Rust port — and the panel is a webview holding an iframe on that
 port. The bundle keeps its own origin that way, so its relative `fetch("/api/…")`
 calls reach the extension's server unchanged.
+
+The MCP server is the TypeScript API without a window: Cursor spawns
+`apps/mcp/dist/server.js` over stdio and the agent calls `refresh_usage` /
+`get_usage` instead of loading the dashboard.
 
 ## Using the dashboard
 
@@ -169,6 +198,12 @@ which on macOS is
 `~/Library/Application Support/Code/User/globalStorage/prajwal-hebbar-07.token-tracker/token-tracker.sqlite`,
 so installing both leaves each with its own copy.
 
+The MCP server reuses the desktop app database when that file is already on
+disk, so Agent chat and the window stay on the same snapshot. If the desktop
+app has never been launched, the server creates
+`~/.token-tracker/token-tracker.sqlite` instead. `DATA_DIR` overrides either
+choice.
+
 Account limits come from each provider rather than from estimates based on
 local token counts. Oh My Pi supplies the supported providers; Ollama Cloud's
 session and weekly percentages come from its account usage endpoint; Cursor's
@@ -202,8 +237,9 @@ pnpm build
 ```
 
 `pnpm dev` runs the desktop app from a debug build, `pnpm bundle` produces the
-installer, `pnpm test` runs the reference API test suite, and `pnpm build`
-compiles the dashboard bundle that gets embedded into the binary.
+installer, `pnpm test` runs the reference API and MCP test suites, and
+`pnpm build` compiles the dashboard bundle, the TypeScript API, and the MCP
+server. Cursor Agent chat needs that MCP `dist` before it can spawn the server.
 
 There is no development web server. The dashboard is a static bundle compiled
 into the app, so `apps/web` is built rather than served, and nothing listens on

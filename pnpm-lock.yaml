@@ -34,6 +34,22 @@ importers:
         specifier: 2.11.4
         version: 2.11.4
 
+  apps/mcp:
+    dependencies:
+      '@token-tracker/api':
+        specifier: workspace:*
+        version: link:../api
+    devDependencies:
+      '@types/node':
+        specifier: 26.2.0
+        version: 26.2.0
+      tsx:
+        specifier: 4.23.12
+        version: 4.23.12
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+
   apps/vscode:
     dependencies:
       '@token-tracker/api':

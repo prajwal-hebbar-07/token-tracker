@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "token-tracker": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${workspaceFolder}/apps/mcp/dist/server.js"]
+    }
+  }
+}
